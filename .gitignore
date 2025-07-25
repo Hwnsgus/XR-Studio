@@ -58,3 +58,14 @@ Thumbs.db
 *.out
 *.class
 *.jar
+
+
+# Ignore all binary assets
+*.uasset
+*.umap
+
+# Optional: Ignore specific folders
+/Content/Modern_House_V1/
+/Content/Mediasource/
+/Content/Texture/
+/Content/*.uasset
