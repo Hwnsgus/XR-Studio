@@ -89,9 +89,15 @@ class UnifiedUnrealEditorUI:
         self.texture_info = tk.Text(self.root, height=15, width=60)
         self.texture_info.pack()
 
+        tk.Button(self.root, text="🆕 액터 Spawn", command=self.spawn_actor).pack(pady=5)
+        tk.Button(self.root, text="📦 FBX 임포트 + 배치", command=self.import_and_place_fbx).pack(pady=5)
+
+
         # 슬롯 버튼 영역
         self.slot_frame = tk.Frame(self.root)
         self.slot_frame.pack(pady=5)
+
+
 
     # ✅ 액터 목록 조회
     def load_actor_list(self):
@@ -175,6 +181,58 @@ class UnifiedUnrealEditorUI:
             self.scale_z.set(0)
 
         self.send_move()
+
+    def import_and_place_fbx(self):
+        filepath = filedialog.askopenfilename(
+            title="FBX 파일 선택",
+            filetypes=[("FBX 파일", "*.fbx")]
+        )
+        if not filepath:
+            return
+        # FBX 전체 경로를 Unreal로 전송
+        command = f'IMPORT_FBX "{filepath}"'
+        result = self.client.send_command(command)
+        self.texture_info.insert(tk.END, f"\n{result}\n")
+
+
+    def load_blueprint_list(self, path="/Game/SimBlank/Blueprints"):
+        cmd = f"GET_BLUEPRINTS {path}"
+        result = self.client.send_command(cmd)
+        blueprint_paths = result.strip().splitlines()
+
+        # 출력 또는 리스트박스에 표시
+        for path in blueprint_paths:
+            print("🔹", path)
+                # 예: 자동 선택해서 Spawn 명령 보내기
+        if blueprint_paths:
+            chosen = blueprint_paths[0]  # 예: 첫 번째 블루프린트
+            spawn_cmd = f"SPAWN {chosen} 0 0 100"
+            spawn_result = self.client.send_command(spawn_cmd)
+            print("Spawn 결과:", spawn_result)
+
+    def spawn_actor(self):
+        filepath = filedialog.askopenfilename(
+            title="Spawn할 블루프린트 선택",
+            initialdir="D:/git/XR-Studio/MyProjectCamera/Content/Blueprints",
+            filetypes=[("블루프린트", "*.uasset")]
+        )
+        if not filepath:
+            return
+
+        # Unreal 경로로 변환
+        unreal_path = convert_to_unreal_path(filepath)
+        if not unreal_path.endswith("_C"):
+            unreal_path += "_C"  # 컴파일된 BP 클래스
+
+        # 간단하게 위치 하드코딩 or 개선 시 TextEntry 등 UI 추가 가능
+        x, y, z = 0, 0, 100  # Spawn 위치 기본값
+        cmd = f"SPAWN {unreal_path} {x} {y} {z}"
+        result = self.client.send_command(cmd)
+        self.texture_info.insert(tk.END, f"\n{result}\n")
+
+        # 액터 목록 갱신
+        self.load_actor_list()
+
 
     # ✅ GUI 실행
     def run(self):

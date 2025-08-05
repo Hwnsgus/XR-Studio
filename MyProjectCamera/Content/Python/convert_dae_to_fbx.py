@@ -2,10 +2,13 @@ import bpy
 import sys
 import os
 
+"""
 # 로그 저장
 log_path = "D:/UnrealProject/MyProjectCamera/Content/Python/fbx_convert_log.txt"
 sys.stdout = open(log_path, 'w')
 sys.stderr = sys.stdout
+"""
+
 
 dae_path = "D:/UnrealProject/MyProjectCamera/Content/Scripts/ExportedFBX/house.dae"
 fbx_path = "D:/UnrealProject/MyProjectCamera/Content/Scripts/ExportedFBX/house.fbx"

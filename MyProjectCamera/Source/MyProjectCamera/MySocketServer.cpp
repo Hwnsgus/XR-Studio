@@ -6,12 +6,6 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Common/TcpSocketBuilder.h"
 
-#include "MySocketServer.h"
-#include "EngineUtils.h"
-#include "Sockets.h"
-#include "SocketSubsystem.h"
-#include "Common/TcpSocketBuilder.h"
-
 AMySocketServer::AMySocketServer()
 {
     PrimaryActorTick.bCanEverTick = true;
@@ -105,6 +99,7 @@ void AMySocketServer::Tick(float DeltaTime)
     }
 }
 
+// 서버 소켓을 생성하고 클라이언트 연결을 수락하는 함수
 void AMySocketServer::StartListening(int32 Port)
 {
     ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
@@ -139,6 +134,7 @@ void AMySocketServer::AcceptClients()
     }
 }
 
+// Unreal 엔진에서 기능을 구현하는 함수
 FString AMySocketServer::HandleCommand(const FString& Command)
 {
     TArray<FString> Tokens;
@@ -156,12 +152,28 @@ FString AMySocketServer::HandleCommand(const FString& Command)
         {
             if (It->GetName().Equals(ActorName, ESearchCase::IgnoreCase))
             {
+                USceneComponent* RootComp = It->GetRootComponent();
+                if (!RootComp)
+                {
+                    return FString::Printf(TEXT("❌ '%s' 액터의 루트 컴포넌트를 찾을 수 없습니다."), *ActorName);
+                }
+
+                // 이동 가능 여부 확인
+                if (RootComp->Mobility != EComponentMobility::Movable)
+                {
+                    return FString::Printf(TEXT("❌ '%s'의 Mobility가 'Movable'이 아닙니다. 현재 상태: %s"),
+                        *ActorName,
+                        *UEnum::GetValueAsString(RootComp->Mobility));
+                }
+
                 It->SetActorLocation(FVector(X, Y, Z));
                 return FString::Printf(TEXT("✅ %s 이동 완료: (%.1f, %.1f, %.1f)"), *ActorName, X, Y, Z);
             }
         }
+
         return FString::Printf(TEXT("❌ '%s' 이름의 액터를 찾을 수 없음"), *ActorName);
     }
+
 
     // === SET_TEXTURE 명령 ===
     else if (Tokens[0] == "SET_TEXTURE" && Tokens.Num() >= 5)
@@ -303,10 +315,101 @@ FString AMySocketServer::HandleCommand(const FString& Command)
         return Result.IsEmpty() ? TEXT("⚠️ 머티리얼 없음") : Result;
     }
 
+    // === IMPORT_FBX 명령 ===
+    else if (Tokens[0] == "IMPORT_FBX" && Tokens.Num() >= 2)
+    {
+        FString FBXPath = Command.RightChop(11).TrimQuotes().TrimStartAndEnd(); // 전체 경로 보장
+
+        if (!FPaths::FileExists(FBXPath))
+        {
+            return FString::Printf(TEXT("❌ 파일 없음: %s"), *FBXPath);
+        }
+
+        FString PyCommand = FString::Printf(TEXT("py \"D:/git/XR-Studio/MyProjectCamera/Content/Python/import_fbx_and_place.py\" \"%s\""), *FBXPath);
+        if (GEngine)
+        {
+            GEngine->Exec(GetWorld(), *PyCommand);
+            return FString::Printf(TEXT("📥 FBX 임포트 요청: %s"), *FBXPath);
+        }
+
+        return TEXT("❌ Python 명령 실행 실패");
+        }
+
+
+    // === GET_BLUEPRINTS 명령 ===
+    else if (Tokens[0] == "GET_BLUEPRINTS")
+    {
+        FString Path = Tokens.Num() >= 2 ? Tokens[1] : "/Game";
+
+        TArray<FAssetData> Assets;
+        FARFilter Filter;
+        Filter.ClassNames.Add(UBlueprint::StaticClass()->GetFName());
+        Filter.PackagePaths.Add(*Path);
+        Filter.bRecursivePaths = true;
+
+        FAssetRegistryModule& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+        AssetRegistry.Get().GetAssets(Filter, Assets);
+
+        FString Result;
+        for (const FAssetData& Asset : Assets)
+        {
+            FString Name = Asset.AssetName.ToString();
+            FString ObjectPath = Asset.ObjectPath.ToString(); // e.g. /Game/SimBlank/Blueprints/BP_CameraController.BP_CameraController
+            Result += ObjectPath + TEXT("_C") + LINE_TERMINATOR; // class 경로로 변환
+        }
+
+        return Result.IsEmpty() ? TEXT("⚠️ 블루프린트 없음") : Result;
+        }
+
+
+    // === SPAWN 명령 ===
+    else if (Tokens[0] == "SPAWN" && Tokens.Num() >= 5)
+    {
+        FString BlueprintPath = Tokens[1];
+        float X = FCString::Atof(*Tokens[2]);
+        float Y = FCString::Atof(*Tokens[3]);
+        float Z = FCString::Atof(*Tokens[4]);
+
+        UObject* LoadedObject = StaticLoadObject(UObject::StaticClass(), nullptr, *BlueprintPath);
+        if (!LoadedObject)
+        {
+            return FString::Printf(TEXT("❌ 블루프린트 로드 실패: %s"), *BlueprintPath);
+        }
+
+        UBlueprintGeneratedClass* BlueprintClass = Cast<UBlueprintGeneratedClass>(LoadedObject->GetClass());
+        if (!BlueprintClass)
+        {
+            // 다른 방식으로 얻어보기 (주로 ObjectPath가 /MyBP.MyBP_C 형태일 때 유효)
+            UObject* Object = StaticLoadObject(UObject::StaticClass(), nullptr, *BlueprintPath);
+            if (UBlueprintGeneratedClass* AltClass = Cast<UBlueprintGeneratedClass>(Object))
+            {
+                BlueprintClass = AltClass;
+            }
+        }
+
+        if (!BlueprintClass)
+        {
+            return FString::Printf(TEXT("❌ 유효한 Blueprint 클래스 아님: %s"), *BlueprintPath);
+        }
+
+        FVector SpawnLocation(X, Y, Z);
+        FRotator SpawnRotation = FRotator::ZeroRotator;
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+        AActor* SpawnedActor = GetWorld()->SpawnActor<AActor>(BlueprintClass, SpawnLocation, SpawnRotation, SpawnParams);
+        if (SpawnedActor)
+        {
+            return FString::Printf(TEXT("✅ Spawn 성공: %s (%s)"), *SpawnedActor->GetName(), *BlueprintPath);
+        }
+
+        return TEXT("❌ Spawn 실패");
+        }
+
+
     // === 알 수 없는 명령 ===
     return TEXT("❌ 알 수 없는 명령");
 }
-
 
 FString AMySocketServer::GetAllActorNames()
 {
