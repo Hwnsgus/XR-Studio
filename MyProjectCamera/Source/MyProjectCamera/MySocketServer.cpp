@@ -1,10 +1,12 @@
-﻿#if WITH_EDITOR
-#include "MySocketServer.h"
+﻿#include "MySocketServer.h"
 #include "EngineUtils.h"
 #include "Sockets.h"
 #include "SocketSubsystem.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Common/TcpSocketBuilder.h"
+#include "Misc/FileHelper.h"
+#include "Misc/Paths.h"
+#include "Editor.h" // GEditor
 
 AMySocketServer::AMySocketServer()
 {
@@ -14,28 +16,26 @@ AMySocketServer::AMySocketServer()
 void AMySocketServer::BeginPlay()
 {
     Super::BeginPlay();
-    StartListening(9999); // ✅ 서버 시작
+    StartListening(9999);
 }
 
 void AMySocketServer::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
- if (!ClientSocket)
-{
-    static int SkipLog = 0;
-    if (++SkipLog % 30 == 0) // 매 30프레임마다 한 번만 로그
-        UE_LOG(LogTemp, Warning, TEXT("❌ ClientSocket is NULL"));
-    return;
-}
-
+    if (!ClientSocket)
+    {
+        static int SkipLog = 0;
+        if (++SkipLog % 30 == 0)
+            UE_LOG(LogTemp, Warning, TEXT("❌ ClientSocket is NULL"));
+        return;
+    }
 
     if (ClientSocket->GetConnectionState() != SCS_Connected)
     {
         UE_LOG(LogTemp, Warning, TEXT("🔌 ClientSocket disconnected"));
         return;
     }
-
 
     uint32 DataSize = 0;
     if (ClientSocket->HasPendingData(DataSize))
@@ -52,9 +52,7 @@ void AMySocketServer::Tick(float DeltaTime)
             return;
         }
 
-        Data.Add(0); // 추가: 널 종료 보장
-
-            // 수신된 데이터를 안전하게 문자열로 변환
+        Data.Add(0);
 
         const char* CharData = reinterpret_cast<const char*>(Data.GetData());
         if (!CharData || CharData[0] == '\0')
@@ -64,14 +62,13 @@ void AMySocketServer::Tick(float DeltaTime)
         }
 
         FString Command = FString(ANSI_TO_TCHAR(CharData));
-
-
-
         Command.TrimStartAndEndInline();
         Command.ReplaceInline(TEXT("\n"), TEXT(""));
         Command.ReplaceInline(TEXT("\r"), TEXT(""));
         Command.ReplaceInline(TEXT("\0"), TEXT(""));
-        Command = Command.Replace(TEXT("\x01"), TEXT("")).Replace(TEXT("\x02"), TEXT("")).Replace(TEXT("\x03"), TEXT(""));
+
+        // 👇 이 부분 꼭 있어야 함!
+        Command = Command.Replace(TEXT("\x01"), TEXT("")).Replace(TEXT("\x02"), TEXT("")).Replace(TEXT("\x03"), TEXT("")).Replace(TEXT("\xFF"), TEXT("")).Replace(TEXT("\xFE"), TEXT(""));
 
         for (int32 i = 0; i < Command.Len(); ++i)
         {
@@ -99,7 +96,6 @@ void AMySocketServer::Tick(float DeltaTime)
     }
 }
 
-// 서버 소켓을 생성하고 클라이언트 연결을 수락하는 함수
 void AMySocketServer::StartListening(int32 Port)
 {
     ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
@@ -134,13 +130,18 @@ void AMySocketServer::AcceptClients()
     }
 }
 
-// Unreal 엔진에서 기능을 구현하는 함수
 FString AMySocketServer::HandleCommand(const FString& Command)
 {
     TArray<FString> Tokens;
     Command.ParseIntoArrayWS(Tokens);
 
-    // === MOVE 명령 ===
+    UE_LOG(LogTemp, Warning, TEXT("🧪 Tokens (%d):"), Tokens.Num());
+    for (int i = 0; i < Tokens.Num(); ++i)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("    [%d] %s"), i, *Tokens[i]);
+    }
+
+
     if (Tokens.Num() >= 5 && Tokens[0] == "MOVE")
     {
         FString ActorName = Tokens[1];
@@ -154,28 +155,18 @@ FString AMySocketServer::HandleCommand(const FString& Command)
             {
                 USceneComponent* RootComp = It->GetRootComponent();
                 if (!RootComp)
-                {
                     return FString::Printf(TEXT("❌ '%s' 액터의 루트 컴포넌트를 찾을 수 없습니다."), *ActorName);
-                }
 
-                // 이동 가능 여부 확인
                 if (RootComp->Mobility != EComponentMobility::Movable)
-                {
-                    return FString::Printf(TEXT("❌ '%s'의 Mobility가 'Movable'이 아닙니다. 현재 상태: %s"),
-                        *ActorName,
-                        *UEnum::GetValueAsString(RootComp->Mobility));
-                }
+                    return FString::Printf(TEXT("❌ '%s'의 Mobility가 'Movable'이 아닙니다."), *ActorName);
 
                 It->SetActorLocation(FVector(X, Y, Z));
                 return FString::Printf(TEXT("✅ %s 이동 완료: (%.1f, %.1f, %.1f)"), *ActorName, X, Y, Z);
             }
         }
-
         return FString::Printf(TEXT("❌ '%s' 이름의 액터를 찾을 수 없음"), *ActorName);
     }
 
-
-    // === SET_TEXTURE 명령 ===
     else if (Tokens[0] == "SET_TEXTURE" && Tokens.Num() >= 5)
     {
         FString ActorName = Tokens[1];
@@ -184,8 +175,7 @@ FString AMySocketServer::HandleCommand(const FString& Command)
         FString TexturePath = Tokens[4];
 
         UTexture* NewTexture = Cast<UTexture>(StaticLoadObject(UTexture::StaticClass(), nullptr, *TexturePath));
-        if (!NewTexture)
-            return TEXT("❌ 텍스처 로드 실패");
+        if (!NewTexture) return TEXT("❌ 텍스처 로드 실패");
 
         for (TActorIterator<AActor> It(GetWorld()); It; ++It)
         {
@@ -199,11 +189,6 @@ FString AMySocketServer::HandleCommand(const FString& Command)
                     if (MeshComp->GetNumMaterials() <= SlotIndex)
                         continue;
 
-                    // 머티리얼 가져오기
-                    UMaterialInterface* Mat = MeshComp->GetMaterial(SlotIndex);
-                    if (!Mat) continue;
-
-                    // 동적 머티리얼 생성 및 파라미터 적용
                     UMaterialInstanceDynamic* DynMat = MeshComp->CreateAndSetMaterialInstanceDynamic(SlotIndex);
                     if (!DynMat) continue;
 
@@ -216,7 +201,6 @@ FString AMySocketServer::HandleCommand(const FString& Command)
         return TEXT("❌ 적용 실패 (액터 또는 슬롯 없음)");
     }
 
-    // === GET_TEXTURES 명령 ===
     else if (Tokens[0] == "GET_TEXTURES" && Tokens.Num() >= 2)
     {
         FString ActorName = Tokens[1];
@@ -245,9 +229,7 @@ FString AMySocketServer::HandleCommand(const FString& Command)
                         for (UTexture* Tex : Textures)
                         {
                             if (Tex)
-                            {
                                 Result += FString::Printf(TEXT("    └ Texture: %s\n"), *Tex->GetName());
-                            }
                         }
                     }
                 }
@@ -260,7 +242,6 @@ FString AMySocketServer::HandleCommand(const FString& Command)
     }
 
 
-	// === SET_MATERIAL 명령 ===
     else if (Tokens[0] == "SET_MATERIAL" && Tokens.Num() >= 4)
     {
         FString ActorName = Tokens[1];
@@ -268,8 +249,7 @@ FString AMySocketServer::HandleCommand(const FString& Command)
         FString MaterialPath = Tokens[3];
 
         UMaterialInterface* NewMaterial = Cast<UMaterialInterface>(StaticLoadObject(UMaterialInterface::StaticClass(), nullptr, *MaterialPath));
-        if (!NewMaterial)
-            return TEXT("❌ 머티리얼 로드 실패");
+        if (!NewMaterial) return TEXT("❌ 머티리얼 로드 실패");
 
         for (TActorIterator<AActor> It(GetWorld()); It; ++It)
         {
@@ -290,16 +270,14 @@ FString AMySocketServer::HandleCommand(const FString& Command)
         }
 
         return TEXT("❌ 적용 실패 (액터 또는 슬롯 없음)");
-        }
+    }
 
-
-    // === GET_MATERIALS 명령 ===
     else if (Tokens[0] == "GET_MATERIALS")
     {
         FString Path = Tokens.Num() >= 2 ? Tokens[1] : "/Game";
         TArray<FAssetData> Assets;
         FARFilter Filter;
-        Filter.ClassNames.Add(UMaterialInterface::StaticClass()->GetFName());
+        Filter.ClassPaths.Add(UMaterialInterface::StaticClass()->GetClassPathName());
         Filter.PackagePaths.Add(*Path);
         Filter.bRecursivePaths = true;
 
@@ -309,41 +287,18 @@ FString AMySocketServer::HandleCommand(const FString& Command)
         FString Result;
         for (const FAssetData& Asset : Assets)
         {
-            Result += Asset.ObjectPath.ToString() + LINE_TERMINATOR;
+            Result += Asset.GetObjectPathString() + LINE_TERMINATOR;
         }
 
         return Result.IsEmpty() ? TEXT("⚠️ 머티리얼 없음") : Result;
     }
 
-    // === IMPORT_FBX 명령 ===
-    else if (Tokens[0] == "IMPORT_FBX" && Tokens.Num() >= 2)
-    {
-        FString FBXPath = Command.RightChop(11).TrimQuotes().TrimStartAndEnd(); // 전체 경로 보장
-
-        if (!FPaths::FileExists(FBXPath))
-        {
-            return FString::Printf(TEXT("❌ 파일 없음: %s"), *FBXPath);
-        }
-
-        FString PyCommand = FString::Printf(TEXT("py \"D:/git/XR-Studio/MyProjectCamera/Content/Python/import_fbx_and_place.py\" \"%s\""), *FBXPath);
-        if (GEngine)
-        {
-            GEngine->Exec(GetWorld(), *PyCommand);
-            return FString::Printf(TEXT("📥 FBX 임포트 요청: %s"), *FBXPath);
-        }
-
-        return TEXT("❌ Python 명령 실행 실패");
-        }
-
-
-    // === GET_BLUEPRINTS 명령 ===
     else if (Tokens[0] == "GET_BLUEPRINTS")
     {
         FString Path = Tokens.Num() >= 2 ? Tokens[1] : "/Game";
-
         TArray<FAssetData> Assets;
         FARFilter Filter;
-        Filter.ClassNames.Add(UBlueprint::StaticClass()->GetFName());
+        Filter.ClassPaths.Add(FTopLevelAssetPath(TEXT("/Script/Engine"), TEXT("Blueprint")));
         Filter.PackagePaths.Add(*Path);
         Filter.bRecursivePaths = true;
 
@@ -353,86 +308,59 @@ FString AMySocketServer::HandleCommand(const FString& Command)
         FString Result;
         for (const FAssetData& Asset : Assets)
         {
-            FString Name = Asset.AssetName.ToString();
-            FString ObjectPath = Asset.ObjectPath.ToString(); // e.g. /Game/SimBlank/Blueprints/BP_CameraController.BP_CameraController
-            Result += ObjectPath + TEXT("_C") + LINE_TERMINATOR; // class 경로로 변환
+            Result += Asset.GetObjectPathString() + TEXT("_C") + LINE_TERMINATOR;
         }
 
         return Result.IsEmpty() ? TEXT("⚠️ 블루프린트 없음") : Result;
-        }
+    }
 
-
-    // === SPAWN 명령 ===
-    else if (Tokens[0] == "SPAWN" && Tokens.Num() >= 5)
+    else if (Tokens.Num() >= 2 && Tokens[0] == "IMPORT_FBX")
     {
-        FString BlueprintPath = Tokens[1];
-        float X = FCString::Atof(*Tokens[2]);
-        float Y = FCString::Atof(*Tokens[3]);
-        float Z = FCString::Atof(*Tokens[4]);
-
-        UObject* LoadedObject = StaticLoadObject(UObject::StaticClass(), nullptr, *BlueprintPath);
-        if (!LoadedObject)
-        {
-            return FString::Printf(TEXT("❌ 블루프린트 로드 실패: %s"), *BlueprintPath);
-        }
-
-        UBlueprintGeneratedClass* BlueprintClass = Cast<UBlueprintGeneratedClass>(LoadedObject->GetClass());
-        if (!BlueprintClass)
-        {
-            // 다른 방식으로 얻어보기 (주로 ObjectPath가 /MyBP.MyBP_C 형태일 때 유효)
-            UObject* Object = StaticLoadObject(UObject::StaticClass(), nullptr, *BlueprintPath);
-            if (UBlueprintGeneratedClass* AltClass = Cast<UBlueprintGeneratedClass>(Object))
-            {
-                BlueprintClass = AltClass;
-            }
-        }
-
-        if (!BlueprintClass)
-        {
-            return FString::Printf(TEXT("❌ 유효한 Blueprint 클래스 아님: %s"), *BlueprintPath);
-        }
-
-        FVector SpawnLocation(X, Y, Z);
-        FRotator SpawnRotation = FRotator::ZeroRotator;
-        FActorSpawnParameters SpawnParams;
-        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-
-        AActor* SpawnedActor = GetWorld()->SpawnActor<AActor>(BlueprintClass, SpawnLocation, SpawnRotation, SpawnParams);
-        if (SpawnedActor)
-        {
-            return FString::Printf(TEXT("✅ Spawn 성공: %s (%s)"), *SpawnedActor->GetName(), *BlueprintPath);
-        }
-
-        return TEXT("❌ Spawn 실패");
-        }
+#if WITH_EDITOR
+        return TEXT("❌ 에디터 모드에서만 사용 가능합니다. (PIE 상태에서는 FBX 임포트 불가)");
+#else
+        return TEXT("❌ 에디터 모드에서만 사용 가능합니다.");
+#endif
+}
 
 
-    // === 알 수 없는 명령 ===
     return TEXT("❌ 알 수 없는 명령");
 }
 
 FString AMySocketServer::GetAllActorNames()
 {
     FString Result;
-
     for (TActorIterator<AActor> It(GetWorld()); It; ++It)
     {
         FString Name = It->GetName();
-        UE_LOG(LogTemp, Warning, TEXT("📌 Actor: %s"), *Name);
         Result += Name + LINE_TERMINATOR;
     }
-
     return Result;
+}
+
+void AMySocketServer::ExecutePythonAfterDelay(const FString& ScriptPath)
+{
+    FTimerHandle TimerHandle;
+    GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this, ScriptPath]()
+        {
+            if (GEditor)
+            {
+                GEditor->Exec(GetWorld(), *FString::Printf(TEXT("py \"%s\""), *ScriptPath));
+                UE_LOG(LogTemp, Log, TEXT("⏱️ 지연된 Python 스크립트 실행: %s"), *ScriptPath);
+            }
+            else
+            {
+                UE_LOG(LogTemp, Error, TEXT("❌ GEditor 사용 불가 - Python 실행 실패"));
+            }
+        }, 0.1f, false);
 }
 
 void AMySocketServer::SendResponseToPython(const FString& Message)
 {
     if (!ClientSocket) return;
-
     FTCHARToUTF8 Convert(*Message);
     int32 Sent = 0;
     ClientSocket->Send((uint8*)Convert.Get(), Convert.Length(), Sent);
-
     UE_LOG(LogTemp, Log, TEXT("📤 응답 전송: %s"), *Message);
 }
 
@@ -455,7 +383,10 @@ void AMySocketServer::EndPlay(const EEndPlayReason::Type EndPlayReason)
     Super::EndPlay(EndPlayReason);
 }
 
-#endif
+
+
+
+
 // MySocketServer.cpp
 
 

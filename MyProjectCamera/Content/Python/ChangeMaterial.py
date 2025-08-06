@@ -5,29 +5,62 @@ from functools import partial
 
 # 1️⃣ Unreal 소켓 클라이언트
 class UnrealSocketClient:
-    def __init__(self, ip='127.0.0.1', port=9999):
+    def __init__(self, ip='127.0.0.1', ports=[9999, 9998]):
         self.server_ip = ip
-        self.port = port
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.ports = ports  # [PIE용, Editor용]
+        self.sock = None
+        self.current_port = None
 
-    def connect(self):
-        try:
-            self.sock.connect((self.server_ip, self.port))
-            print(f"✅ Unreal 서버 연결 완료: {self.server_ip}:{self.port}")
-        except Exception as e:
-            print(f"❌ 서버 연결 실패: {e}")
+    def connect(self, port=None):
+        for try_port in ([port] if port else self.ports):
+            try:
+                self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.sock.connect((self.server_ip, try_port))
+                self.current_port = try_port
+                print(f"✅ Unreal 서버 연결 완료: {self.server_ip}:{try_port}")
+                return True
+            except Exception as e:
+                print(f"❌ 서버 연결 실패 ({try_port}): {e}")
+        return False
 
     def send_command(self, command: str):
         try:
+            if not self.sock:
+                self.connect()
+
             self.sock.sendall((command.strip() + "\n").encode('utf-8'))
-            print(f"📤 명령 전송: {command}")
-            return self.sock.recv(4096).decode('utf-8')
+            print(f"📤 명령 전송: {command} (포트: {self.current_port})")
+            response = self.sock.recv(4096).decode('utf-8')
+            print(f"📥 응답 수신: {response}")
+
+            if any(keyword in response for keyword in [
+                "에디터 모드에서만",
+                "PIE 상태이므로 FBX 임포트 불가",
+                "WITH_EDITOR",
+                "알 수 없는 명령"
+            ]):
+                if self.current_port != self.ports[1]:
+                    print("🔁 에디터 소켓 서버로 재시도 중...")
+                    self.close()
+                    if self.connect(self.ports[1]):
+                        return self.send_command(command)
+            return response
+
         except Exception as e:
             return f"❌ 통신 오류: {e}"
 
-    def close(self):
-        self.sock.close()
 
+
+    def close(self):
+        if self.sock:
+            self.sock.close()
+            self.sock = None
+
+
+    def close(self):
+        if self.sock:
+            self.sock.close()
+            self.sock = None
 
 # 2️⃣ 경로 변환 (윈도우 → 언리얼 경로)
 def convert_to_unreal_path(filepath):
@@ -89,7 +122,6 @@ class UnifiedUnrealEditorUI:
         self.texture_info = tk.Text(self.root, height=15, width=60)
         self.texture_info.pack()
 
-        tk.Button(self.root, text="🆕 액터 Spawn", command=self.spawn_actor).pack(pady=5)
         tk.Button(self.root, text="📦 FBX 임포트 + 배치", command=self.import_and_place_fbx).pack(pady=5)
 
 
@@ -183,55 +215,25 @@ class UnifiedUnrealEditorUI:
         self.send_move()
 
     def import_and_place_fbx(self):
+        from tkinter import filedialog
+        import os
+
         filepath = filedialog.askopenfilename(
             title="FBX 파일 선택",
             filetypes=[("FBX 파일", "*.fbx")]
         )
         if not filepath:
             return
-        # FBX 전체 경로를 Unreal로 전송
-        command = f'IMPORT_FBX "{filepath}"'
+
+        # ✅ Unreal에서 TempFbxImportScript.py를 실행하도록 명령 전송
+        script_path = "D:/git/XR-Studio/MyProjectCamera/Content/Python/TempFbxImportScript.py"
+        command = f'py "{script_path}" "{filepath}"'
         result = self.client.send_command(command)
+
+        # ✅ 결과 출력
         self.texture_info.insert(tk.END, f"\n{result}\n")
 
 
-    def load_blueprint_list(self, path="/Game/SimBlank/Blueprints"):
-        cmd = f"GET_BLUEPRINTS {path}"
-        result = self.client.send_command(cmd)
-        blueprint_paths = result.strip().splitlines()
-
-        # 출력 또는 리스트박스에 표시
-        for path in blueprint_paths:
-            print("🔹", path)
-                # 예: 자동 선택해서 Spawn 명령 보내기
-        if blueprint_paths:
-            chosen = blueprint_paths[0]  # 예: 첫 번째 블루프린트
-            spawn_cmd = f"SPAWN {chosen} 0 0 100"
-            spawn_result = self.client.send_command(spawn_cmd)
-            print("Spawn 결과:", spawn_result)
-
-    def spawn_actor(self):
-        filepath = filedialog.askopenfilename(
-            title="Spawn할 블루프린트 선택",
-            initialdir="D:/git/XR-Studio/MyProjectCamera/Content/Blueprints",
-            filetypes=[("블루프린트", "*.uasset")]
-        )
-        if not filepath:
-            return
-
-        # Unreal 경로로 변환
-        unreal_path = convert_to_unreal_path(filepath)
-        if not unreal_path.endswith("_C"):
-            unreal_path += "_C"  # 컴파일된 BP 클래스
-
-        # 간단하게 위치 하드코딩 or 개선 시 TextEntry 등 UI 추가 가능
-        x, y, z = 0, 0, 100  # Spawn 위치 기본값
-        cmd = f"SPAWN {unreal_path} {x} {y} {z}"
-        result = self.client.send_command(cmd)
-        self.texture_info.insert(tk.END, f"\n{result}\n")
-
-        # 액터 목록 갱신
-        self.load_actor_list()
 
 
     # ✅ GUI 실행

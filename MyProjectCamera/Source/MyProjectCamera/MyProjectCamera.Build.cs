@@ -8,7 +8,7 @@ public class MyProjectCamera : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "CinematicCamera", "Networking", "Sockets" });
+		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "CinematicCamera", "Networking", "Sockets", "UnrealEd"});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { "AssetRegistry" });
 

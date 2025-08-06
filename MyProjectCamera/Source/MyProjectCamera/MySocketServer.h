@@ -27,9 +27,16 @@ protected:
     void SendResponseToPython(const FString& Message);
     FString GetAllActorNames();
 
+
 private:
     FSocket* ListenSocket = nullptr;
     FSocket* ClientSocket = nullptr;
     FTimerHandle ListenTimerHandle;
     TSharedPtr<FInternetAddr> PythonAddress;
+
+#if WITH_EDITOR
+    void ExecutePythonAfterDelay(const FString& ScriptPath);
+    FString HandleImportFbx(const FString& Command);
+#endif
+
 };
