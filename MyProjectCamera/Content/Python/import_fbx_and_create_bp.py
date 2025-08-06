@@ -44,5 +44,5 @@ def import_fbx(fbx_path, destination_path="/Game/Imported", bp_name="AutoActor")
     return bp.get_path_name() + "_C"
 
 # 예제 실행
-fbx_path = r"D:\git\XR-Studio\MyProjectCamera\Content\Scripts\ExportedFBX\house.fbx"
+fbx_path = r"D:\git\XR-Studio\MyProjectCamera\Content\Scripts\ExportedFBX\wall.fbx"
 import_fbx(fbx_path)

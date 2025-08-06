@@ -10,8 +10,8 @@ sys.stderr = sys.stdout
 """
 
 
-dae_path = "D:/UnrealProject/MyProjectCamera/Content/Scripts/ExportedFBX/house.dae"
-fbx_path = "D:/UnrealProject/MyProjectCamera/Content/Scripts/ExportedFBX/house.fbx"
+dae_path = "D:/git/XR-Studio/MyProjectCamera/Content/Scripts/ExportedFBX/wall.dae"
+fbx_path = "D:/git/XR-Studio/MyProjectCamera/Content/Scripts/ExportedFBX/wall.fbx"
 
 # 새 씬으로 초기화
 bpy.ops.wm.read_factory_settings(use_empty=True)
