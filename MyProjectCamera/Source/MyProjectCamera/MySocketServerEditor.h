@@ -5,7 +5,7 @@
 #include "Sockets.h"
 #include "SocketSubsystem.h"
 
-#include "AMySocketServerEditor.generated.h"
+#include "MySocketServerEditor.generated.h" 
 
 UCLASS()
 class MYPROJECTCAMERA_API AMySocketServerEditor : public AActor
@@ -16,6 +16,7 @@ public:
     AMySocketServerEditor();
 
 #if WITH_EDITOR
+    virtual void BeginPlay() override;
     virtual void PostInitializeComponents() override;
     virtual bool ShouldTickIfViewportsOnly() const override { return true; }
     virtual void Tick(float DeltaTime) override;
@@ -30,5 +31,6 @@ private:
     FSocket* ListenSocket = nullptr;
     FSocket* ClientSocket = nullptr;
     FTimerHandle ListenTimerHandle;
+    static bool bHasInitialized;
 #endif
 };

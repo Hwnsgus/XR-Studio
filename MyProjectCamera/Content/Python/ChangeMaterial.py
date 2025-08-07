@@ -25,29 +25,31 @@ class UnrealSocketClient:
 
     def send_command(self, command: str):
         try:
-            if not self.sock:
-                self.connect()
+            editor_only_keywords = ["py ", "SPAWN_ASSET", "IMPORT_FBX"]
+
+            force_editor = any(command.strip().startswith(k) for k in editor_only_keywords)
+
+            if force_editor and self.current_port != self.ports[1]:
+                self.close()
+                if not self.connect(self.ports[1]):
+                    print("❌ Unreal Editor에서 'AMySocketServerEditor'가 활성화되지 않았습니다.")
+                    return "❌ 연결 실패"
+
+            elif not self.sock:
+                if not self.connect():
+                    print("❌ Unreal 서버에 연결할 수 없습니다.")
+                    return "❌ 연결 실패"
 
             self.sock.sendall((command.strip() + "\n").encode('utf-8'))
             print(f"📤 명령 전송: {command} (포트: {self.current_port})")
             response = self.sock.recv(4096).decode('utf-8')
             print(f"📥 응답 수신: {response}")
 
-            if any(keyword in response for keyword in [
-                "에디터 모드에서만",
-                "PIE 상태이므로 FBX 임포트 불가",
-                "WITH_EDITOR",
-                "알 수 없는 명령"
-            ]):
-                if self.current_port != self.ports[1]:
-                    print("🔁 에디터 소켓 서버로 재시도 중...")
-                    self.close()
-                    if self.connect(self.ports[1]):
-                        return self.send_command(command)
             return response
 
         except Exception as e:
             return f"❌ 통신 오류: {e}"
+
 
 
 
@@ -225,13 +227,24 @@ class UnifiedUnrealEditorUI:
         if not filepath:
             return
 
-        # ✅ Unreal에서 TempFbxImportScript.py를 실행하도록 명령 전송
+        # ✅ 1. FBX 임포트 실행 (Python 스크립트 호출)
         script_path = "D:/git/XR-Studio/MyProjectCamera/Content/Python/TempFbxImportScript.py"
         command = f'py "{script_path}" "{filepath}"'
         result = self.client.send_command(command)
 
-        # ✅ 결과 출력
         self.texture_info.insert(tk.END, f"\n{result}\n")
+
+        # ✅ 2. Unreal 경로 계산 → 스폰 명령 전송
+        unreal_path = convert_to_unreal_path(filepath).replace(".fbx", "")
+        spawn_command = f'SPAWN_ASSET "{unreal_path}"'
+        spawn_result = self.client.send_command(spawn_command)
+
+        self.texture_info.insert(tk.END, f"\n{spawn_result}\n")
+
+        # ✅ 로그 출력 (선택)
+        print(spawn_result)
+
+    
 
 
 
