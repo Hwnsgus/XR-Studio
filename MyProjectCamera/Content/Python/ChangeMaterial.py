@@ -25,11 +25,13 @@ class UnrealSocketClient:
 
     def send_command(self, command: str):
         try:
-            editor_only_keywords = ["py ", "SPAWN_ASSET", "IMPORT_FBX"]
+            is_editor_command = command.strip().startswith("py ") or \
+                                command.strip().startswith("SPAWN_ASSET") or \
+                                command.strip().startswith("IMPORT_FBX")
 
-            force_editor = any(command.strip().startswith(k) for k in editor_only_keywords)
+            self.connect(self.ports[1] if is_editor_command else self.ports[0])
 
-            if force_editor and self.current_port != self.ports[1]:
+            if is_editor_command and self.current_port != self.ports[1]:
                 self.close()
                 if not self.connect(self.ports[1]):
                     print("❌ Unreal Editor에서 'AMySocketServerEditor'가 활성화되지 않았습니다.")
@@ -52,17 +54,11 @@ class UnrealSocketClient:
 
 
 
-
     def close(self):
         if self.sock:
             self.sock.close()
             self.sock = None
 
-
-    def close(self):
-        if self.sock:
-            self.sock.close()
-            self.sock = None
 
 # 2️⃣ 경로 변환 (윈도우 → 언리얼 경로)
 def convert_to_unreal_path(filepath):
@@ -216,31 +212,38 @@ class UnifiedUnrealEditorUI:
 
         self.send_move()
 
+    def send_editor_command(self, command: str):
+        # 무조건 Editor 포트 사용
+        self.client.close()
+        if self.client.connect(self.client.ports[1]):  # ports[1] == 9998
+            return self.client.send_command(command)
+        return "❌ Unreal Editor와 연결되지 않았습니다."
+    
     def import_and_place_fbx(self):
         from tkinter import filedialog
         import os
-
+    
         filepath = filedialog.askopenfilename(
             title="FBX 파일 선택",
             filetypes=[("FBX 파일", "*.fbx")]
         )
         if not filepath:
             return
-
+    
         # ✅ 1. FBX 임포트 실행 (Python 스크립트 호출)
         script_path = "D:/git/XR-Studio/MyProjectCamera/Content/Python/TempFbxImportScript.py"
         command = f'py "{script_path}" "{filepath}"'
-        result = self.client.send_command(command)
-
+        result = self.send_editor_command(command)  # ← 여기서 명시적으로 9998 사용
+    
         self.texture_info.insert(tk.END, f"\n{result}\n")
-
+    
         # ✅ 2. Unreal 경로 계산 → 스폰 명령 전송
         unreal_path = convert_to_unreal_path(filepath).replace(".fbx", "")
         spawn_command = f'SPAWN_ASSET "{unreal_path}"'
-        spawn_result = self.client.send_command(spawn_command)
-
+        spawn_result = self.send_editor_command(spawn_command)  # ← 여기도 9998
+    
         self.texture_info.insert(tk.END, f"\n{spawn_result}\n")
-
+    
         # ✅ 로그 출력 (선택)
         print(spawn_result)
 

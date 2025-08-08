@@ -15,12 +15,15 @@ class MYPROJECTCAMERA_API AMySocketServerEditor : public AActor
 public:
     AMySocketServerEditor();
 
-#if WITH_EDITOR
+protected:
     virtual void BeginPlay() override;
-    virtual void PostInitializeComponents() override;
-    virtual bool ShouldTickIfViewportsOnly() const override { return true; }
     virtual void Tick(float DeltaTime) override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+#if WITH_EDITOR
+    virtual void PostInitializeComponents() override;
+    void PostActorCreated();
+    virtual bool ShouldTickIfViewportsOnly() const override { return true; }
 
 private:
     void StartListening(int32 Port);

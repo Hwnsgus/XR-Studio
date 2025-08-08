@@ -1,7 +1,5 @@
 ﻿#include "MySocketServerEditor.h"
 
-#if WITH_EDITOR
-
 #include "TimerManager.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -10,22 +8,10 @@
 #include "Engine/StaticMeshActor.h"
 #include "Common/TcpSocketBuilder.h"
 
-void AMySocketServerEditor::BeginPlay()
-{
-    Super::BeginPlay();
 
-    UE_LOG(LogTemp, Warning, TEXT("🚀 BeginPlay - Editor 서버 리스닝 시도"));
+#if WITH_EDITOR
 
-    if (!ListenSocket)
-    {
-        StartListening(9998);
-    }
-    else
-    {
-        UE_LOG(LogTemp, Warning, TEXT("⚠️ 이미 소켓이 열려 있습니다."));
-    }
-}
-
+bool AMySocketServerEditor::bHasInitialized = false;
 
 AMySocketServerEditor::AMySocketServerEditor()
 {
@@ -47,7 +33,10 @@ void AMySocketServerEditor::PostInitializeComponents()
     Super::PostInitializeComponents();
     UE_LOG(LogTemp, Warning, TEXT("🔥 MySocketServerEditor 생성됨"));
 
-    StartListening(9998);
+    if (!ListenSocket)
+    {
+        StartListening(9998);
+    }
 }
 
 void AMySocketServerEditor::Tick(float DeltaTime)
@@ -87,6 +76,8 @@ void AMySocketServerEditor::Tick(float DeltaTime)
 
 void AMySocketServerEditor::StartListening(int32 Port)
 {
+    UE_LOG(LogTemp, Warning, TEXT("🚪 StartListening 진입 (포트: %d)"), Port);
+
     if (ListenSocket)
     {
         UE_LOG(LogTemp, Warning, TEXT("⚠️ 이미 리스닝 중입니다. (포트: %d)"), Port);
@@ -106,8 +97,7 @@ void AMySocketServerEditor::StartListening(int32 Port)
 
     UE_LOG(LogTemp, Warning, TEXT("✅ 에디터 소켓 리슨 시작됨 (포트: %d)"), Port);
 
-    UWorld* World = GetWorld();
-    if (World)
+    if (UWorld* World = GetWorld())
     {
         World->GetTimerManager().SetTimer(ListenTimerHandle, this, &AMySocketServerEditor::AcceptClients, 0.2f, true);
     }
@@ -119,40 +109,59 @@ void AMySocketServerEditor::StartListening(int32 Port)
 
 void AMySocketServerEditor::AcceptClients()
 {
-    if (!ListenSocket) return;
+    if (!ListenSocket)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("❌ ListenSocket 없음"));
+        return;
+    }
 
     TSharedRef<FInternetAddr> ClientAddr = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM)->CreateInternetAddr();
 
-    bool Pending;
-    if (ListenSocket->HasPendingConnection(Pending) && Pending)
+    bool bPending = false;
+    if (ListenSocket->HasPendingConnection(bPending))
     {
-        UE_LOG(LogTemp, Log, TEXT("⏳ 연결 대기 중..."));
-
-        FSocket* NewClient = ListenSocket->Accept(*ClientAddr, TEXT("EditorClient"));
-        if (NewClient)
+        if (bPending)
         {
-            ClientSocket = NewClient;
-            UE_LOG(LogTemp, Log, TEXT("✅ Editor 클라이언트 접속됨: %s"), *ClientAddr->ToString(true));
+            UE_LOG(LogTemp, Log, TEXT("⏳ 연결 대기 중..."));
+
+            FSocket* NewClient = ListenSocket->Accept(*ClientAddr, TEXT("EditorClient"));
+            if (NewClient)
+            {
+                ClientSocket = NewClient;
+                UE_LOG(LogTemp, Log, TEXT("✅ Editor 클라이언트 접속됨: %s"), *ClientAddr->ToString(true));
+            }
+            else
+            {
+                UE_LOG(LogTemp, Error, TEXT("❌ 클라이언트 소켓 수락 실패"));
+            }
         }
+        else
+        {
+            UE_LOG(LogTemp, Log, TEXT("❌ Pending 연결 없음"));
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("❌ ListenSocket->HasPendingConnection 실패"));
     }
 }
 
 void AMySocketServerEditor::HandleIncomingCommand(const FString& Command)
 {
+    if (GEditor->PlayWorld)
+    {
+        UE_LOG(LogTemp, Error, TEXT("🚫 PIE 상태에서는 에디터 명령을 처리할 수 없습니다."));
+        return;
+    }
+
     if (Command.StartsWith("SPAWN_ASSET"))
     {
         FString AssetPath = Command.RightChop(11).TrimQuotes().TrimStartAndEnd();
 
         if (UStaticMesh* StaticMesh = Cast<UStaticMesh>(StaticLoadObject(UStaticMesh::StaticClass(), nullptr, *AssetPath)))
         {
-            UWorld* World = GEditor->GetEditorWorldContext().World();
-            if (!World)
-            {
-                UE_LOG(LogTemp, Error, TEXT("❌ 에디터 월드 없음"));
-                return;
-            }
-
-            AStaticMeshActor* MeshActor = World->SpawnActor<AStaticMeshActor>(
+            UWorld* EditorWorld = GEditor->GetEditorWorldContext().World();
+            AStaticMeshActor* MeshActor = EditorWorld->SpawnActor<AStaticMeshActor>(
                 AStaticMeshActor::StaticClass(),
                 FVector(0, 0, 100),
                 FRotator::ZeroRotator
@@ -180,6 +189,7 @@ void AMySocketServerEditor::HandleIncomingCommand(const FString& Command)
     if (Command.StartsWith("py "))
     {
         FString ScriptAndArgs = Command.Mid(3).TrimStartAndEnd();
+
         if (!ScriptAndArgs.IsEmpty())
         {
             ExecutePythonAfterDelay(ScriptAndArgs);
@@ -189,44 +199,6 @@ void AMySocketServerEditor::HandleIncomingCommand(const FString& Command)
             UE_LOG(LogTemp, Warning, TEXT("⚠️ py 명령에 인자가 없습니다."));
         }
 
-        return;
-    }
-
-    if (Command.StartsWith("IMPORT_FBX"))
-    {
-        FString FBXPath = Command.RightChop(11).TrimQuotes().TrimStartAndEnd();
-
-        if (!FPaths::FileExists(FBXPath))
-        {
-            UE_LOG(LogTemp, Error, TEXT("❌ 파일 없음: %s"), *FBXPath);
-            return;
-        }
-
-        FString Script;
-        Script += "import unreal\n";
-        Script += "import os\n";
-        Script += FString::Printf(TEXT("fbx_path = r\"%s\"\n"), *FBXPath);
-        Script += "asset_tools = unreal.AssetToolsHelpers.get_asset_tools()\n";
-        Script += "destination_path = '/Game/Imported'\n";
-        Script += "filename = os.path.splitext(os.path.basename(fbx_path))[0]\n";
-        Script += "task = unreal.AssetImportTask()\n";
-        Script += "task.filename = fbx_path\n";
-        Script += "task.destination_path = destination_path\n";
-        Script += "task.automated = True\n";
-        Script += "task.save = True\n";
-        Script += "asset_tools.import_asset_tasks([task])\n";
-        Script += "mesh_path = destination_path + '/' + filename\n";
-        Script += "mesh = unreal.load_asset(mesh_path)\n";
-        Script += "if mesh:\n";
-        Script += "    actor = unreal.EditorLevelLibrary.spawn_actor_from_object(mesh, unreal.Vector(0,0,100), unreal.Rotator(0,0,0))\n";
-        Script += "    print('✅ Spawned:', actor.get_name())\n";
-        Script += "else:\n";
-        Script += "    print('❌ Failed to import mesh')\n";
-
-        FString TempScriptPath = TEXT("D:/git/XR-Studio/MyProjectCamera/Content/Python/TempFbxImportScript.py");
-        FFileHelper::SaveStringToFile(Script, *TempScriptPath);
-
-        ExecutePythonAfterDelay(TempScriptPath);
         return;
     }
 
