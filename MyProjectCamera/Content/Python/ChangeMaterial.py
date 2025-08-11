@@ -120,8 +120,8 @@ class UnifiedUnrealEditorUI:
         self.texture_info = tk.Text(self.root, height=15, width=60)
         self.texture_info.pack()
 
-        tk.Button(self.root, text="📦 FBX 임포트 + 배치", command=self.import_and_place_fbx).pack(pady=5)
-
+        tk.Button(self.root, text="🧱 에셋 스폰(에디터)", 
+                  command=lambda: self.spawn_existing_asset("/Game/Imported/House")).pack(pady=4)
 
         # 슬롯 버튼 영역
         self.slot_frame = tk.Frame(self.root)
@@ -218,35 +218,30 @@ class UnifiedUnrealEditorUI:
         if self.client.connect(self.client.ports[1]):  # ports[1] == 9998
             return self.client.send_command(command)
         return "❌ Unreal Editor와 연결되지 않았습니다."
+
+    # ✅ (신규) 기존 에셋 경로로 에디터에서 스폰
+    def spawn_existing_asset(self, unreal_asset_path: str):
+        cmd = f'SPAWN_ASSET "{unreal_asset_path}"'
+        result = self.send_editor_command(cmd)
+        self.texture_info.insert(tk.END, f"\n{result}\n")
+        print(result)
     
     def import_and_place_fbx(self):
         from tkinter import filedialog
-        import os
-    
         filepath = filedialog.askopenfilename(
             title="FBX 파일 선택",
             filetypes=[("FBX 파일", "*.fbx")]
         )
         if not filepath:
             return
-    
-        # ✅ 1. FBX 임포트 실행 (Python 스크립트 호출)
-        script_path = "D:/git/XR-Studio/MyProjectCamera/Content/Python/TempFbxImportScript.py"
-        command = f'py "{script_path}" "{filepath}"'
-        result = self.send_editor_command(command)  # ← 여기서 명시적으로 9998 사용
-    
-        self.texture_info.insert(tk.END, f"\n{result}\n")
-    
-        # ✅ 2. Unreal 경로 계산 → 스폰 명령 전송
-        unreal_path = convert_to_unreal_path(filepath).replace(".fbx", "")
-        spawn_command = f'SPAWN_ASSET "{unreal_path}"'
-        spawn_result = self.send_editor_command(spawn_command)  # ← 여기도 9998
-    
-        self.texture_info.insert(tk.END, f"\n{spawn_result}\n")
-    
-        # ✅ 로그 출력 (선택)
-        print(spawn_result)
 
+        script_path = "D:/git/XR-Studio/MyProjectCamera/Content/Python/editor_spawn_actor.py"
+        # 에디터 전용: 9998로 보냄
+        cmd = f'py "{script_path}" --fbx "{filepath}" --dest "/Game/Imported" --spawn'
+        result = self.send_editor_command(cmd)
+
+        self.texture_info.insert(tk.END, f"\n{result}\n")
+        print(result)
     
 
 
