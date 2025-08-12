@@ -1,11 +1,13 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
-
+﻿// MyCameraController.h
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "CineCameraComponent.h"
 #include "MyCameraController.generated.h"
+
+// ✅ 전방 선언(포인터에만 필요). 반드시 UCLASS 전에 위치.
+class UCineCameraComponent;
+class USceneComponent;
 
 UCLASS()
 class MYPROJECTCAMERA_API AMyCameraController : public AActor
@@ -20,35 +22,20 @@ protected:
     virtual void OnConstruction(const FTransform& Transform) override;
     virtual void Tick(float DeltaTime) override;
 
-
 public:
     UFUNCTION(Exec)
     void SetActorLocationByName(FString ActorName, float X, float Y, float Z);
 
-    // 추적할 액터
     UPROPERTY(EditAnywhere, Category = "Tracking")
-    AActor* TargetActor;
+    AActor* TargetActor = nullptr;
 
-
-    // 액터의 위치 (자기 자신)
     UPROPERTY(EditAnywhere, Category = "Location Control")
-    FVector ActorTargetLocation;
+    FVector ActorTargetLocation = FVector::ZeroVector;
 
-    // 카메라 컴포넌트의 로컬 위치
     UPROPERTY(EditAnywhere, Category = "Location Control")
-    FVector CameraTargetLocation;
+    FVector CameraTargetLocation = FVector::ZeroVector;
 
-    // 시네 카메라 컴포넌트
+    // ✅ 전방선언한 타입의 포인터는 헤더에 OK
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-    UCineCameraComponent* CineCamera;
-
-    UFUNCTION(Exec)
-    void PrintCameraLocation()
-    {
-        if (CineCamera)
-        {
-            FVector CamLoc = CineCamera->GetComponentLocation();
-            UE_LOG(LogTemp, Warning, TEXT("카메라 현재 위치: X=%.1f, Y=%.1f, Z=%.1f"), CamLoc.X, CamLoc.Y, CamLoc.Z);
-        }
-    }
+    UCineCameraComponent* CineCamera = nullptr;
 };

@@ -1,14 +1,18 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
-
-
+﻿// MyCameraController.cpp
 #include "MyCameraController.h"
+#include "Components/SceneComponent.h"
 #include "EngineUtils.h"
+
+// ✅ 실제 타입 include는 cpp에서
+#include "CineCameraComponent.h"
+
 
 AMyCameraController::AMyCameraController()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootComponent"));
+    USceneComponent* Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
+    RootComponent = Root;
 
     CineCamera = CreateDefaultSubobject<UCineCameraComponent>(TEXT("CineCamera"));
     CineCamera->SetupAttachment(RootComponent);
@@ -17,8 +21,6 @@ AMyCameraController::AMyCameraController()
 void AMyCameraController::BeginPlay()
 {
     Super::BeginPlay();
-
-    // 필요 시 초기화 로직 작성
     UE_LOG(LogTemp, Warning, TEXT("📸 AMyCameraController::BeginPlay 호출됨"));
 }
 
@@ -38,7 +40,7 @@ void AMyCameraController::Tick(float DeltaTime)
 
     if (TargetActor)
     {
-        FVector TargetLocation = TargetActor->GetActorLocation();
+        const FVector TargetLocation = TargetActor->GetActorLocation();
         SetActorLocation(TargetLocation);
     }
 }

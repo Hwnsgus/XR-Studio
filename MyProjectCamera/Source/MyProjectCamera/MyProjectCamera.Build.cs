@@ -7,10 +7,17 @@ public class MyProjectCamera : ModuleRules
 	public MyProjectCamera(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-	
-		PublicDependencyModuleNames.AddRange(new string[] { "Core", "CoreUObject", "Engine", "InputCore", "CinematicCamera", "Networking", "Sockets", "UnrealEd"});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "AssetRegistry" });
+        PublicDependencyModuleNames.AddRange(new string[] {
+		"Core", "CoreUObject", "Engine", "InputCore", "Sockets", "Networking","CinematicCamera"
+        });
+
+        if (Target.bBuildEditor)
+        {
+		PrivateDependencyModuleNames.AddRange(new string[] {
+			"UnrealEd", "EditorSubsystem", "Slate", "SlateCore",  "AssetRegistry"
+            });
+        }
 
 		// Uncomment if you are using Slate UI
 		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });

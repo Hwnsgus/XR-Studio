@@ -121,7 +121,7 @@ class UnifiedUnrealEditorUI:
         self.texture_info.pack()
 
         tk.Button(self.root, text="🧱 에셋 스폰(에디터)", 
-                  command=lambda: self.spawn_existing_asset("/Game/Imported/House")).pack(pady=4)
+                  command=lambda: self.spawn_existing_asset("/Game/Scripts/ExportedFBX/house")).pack(pady=4)
 
         # 슬롯 버튼 영역
         self.slot_frame = tk.Frame(self.root)
@@ -237,7 +237,7 @@ class UnifiedUnrealEditorUI:
 
         script_path = "D:/git/XR-Studio/MyProjectCamera/Content/Python/editor_spawn_actor.py"
         # 에디터 전용: 9998로 보냄
-        cmd = f'py "{script_path}" --fbx "{filepath}" --dest "/Game/Imported" --spawn'
+        cmd = f'py "{script_path}" --fbx "{filepath}" --dest "/Game/Scripts/ExportedFBX" --spawn'
         result = self.send_editor_command(cmd)
 
         self.texture_info.insert(tk.END, f"\n{result}\n")
