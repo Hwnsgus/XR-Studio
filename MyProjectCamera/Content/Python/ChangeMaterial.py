@@ -121,7 +121,7 @@ class UnifiedUnrealEditorUI:
         self.texture_info.pack()
 
         tk.Button(self.root, text="🧱 에셋 스폰(에디터)", 
-                  command=lambda: self.spawn_existing_asset("/Game/Scripts/ExportedFBX/house")).pack(pady=4)
+                  command=lambda: self.spawn_existing_asset("/Game/Scripts/ExportedFBX/house.house")).pack(pady=4)
 
         # 슬롯 버튼 영역
         self.slot_frame = tk.Frame(self.root)
