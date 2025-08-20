@@ -26,7 +26,9 @@ protected:
     FString HandleCommand(const FString& Command);
     void SendResponseToPython(const FString& Message);
     FString GetAllActorNames();
-
+    FString GetStaticMeshActorNames();
+    FString CmdLoadPreset(const FString& Name, float Ox, float Oy, float Oz);  // ✅ 추가
+    FString CmdSavePreset(const FString& Name);
 
 private:
     FSocket* ListenSocket = nullptr;

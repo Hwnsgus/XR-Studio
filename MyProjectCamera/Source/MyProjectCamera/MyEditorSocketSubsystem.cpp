@@ -204,6 +204,8 @@ void UMyEditorSocketSubsystem::HandleIncomingCommand(const FString& Command)
         return;
     }
 
+    // ... (앞부분 동일)
+
     if (Command.StartsWith(TEXT("SPAWN_ASSET")))
     {
         auto CleanArg = [](FString S)
@@ -253,9 +255,21 @@ void UMyEditorSocketSubsystem::HandleIncomingCommand(const FString& Command)
 
         if (MeshActor && MeshActor->GetStaticMeshComponent())
         {
-            MeshActor->GetStaticMeshComponent()->SetStaticMesh(StaticMesh);
+            UStaticMeshComponent* SMC = MeshActor->GetStaticMeshComponent();
+
+            // ✅ 먼저 Mobility를 Movable로
+            SMC->SetMobility(EComponentMobility::Movable);
+
+            // ✅ 메시에 할당
+            SMC->SetStaticMesh(StaticMesh);
+
+            // (선택) 라벨
             MeshActor->SetActorLabel(TEXT("Spawned_StaticMesh"));
-            UE_LOG(UE_LOG_TAG, Log, TEXT("✅ Spawned: %s"), *MeshActor->GetName());
+
+            // (선택) 즉시 렌더 상태 반영
+            SMC->MarkRenderStateDirty();
+
+            UE_LOG(UE_LOG_TAG, Log, TEXT("✅ Spawned Movable: %s"), *MeshActor->GetName());
             SendToClient(TEXT("OK Spawned\n"));
             return;
         }
@@ -264,6 +278,7 @@ void UMyEditorSocketSubsystem::HandleIncomingCommand(const FString& Command)
         SendToClient(TEXT("ERR SpawnFailed\n"));
         return;
     }
+
 
     if (Command.StartsWith(TEXT("py ")))
     {

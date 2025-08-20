@@ -42,7 +42,7 @@ class UnrealSocketClient:
             return False
 
     def _recv_until(self, timeout_sec=2.0):
-        """\\n 도착하거나 timeout이면 종료 (GUI 프리징 방지)"""
+        """\n 도착하거나 timeout이면 종료 (GUI 프리징 방지)"""
         end = time.time() + timeout_sec
         chunks = []
         while time.time() < end:
@@ -143,6 +143,13 @@ class UnifiedUnrealEditorUI:
         self.selected_slot = None
         self.position = {"X": 0, "Y": 0, "Z": 0}
 
+        # Preset UI 변수
+        self.preset_name_var = tk.StringVar(value="MyPreset")
+        self.only_selected_var = tk.BooleanVar(value=False)
+        self.offset_x_var = tk.DoubleVar(value=0.0)
+        self.offset_y_var = tk.DoubleVar(value=0.0)
+        self.offset_z_var = tk.DoubleVar(value=0.0)
+
         self.build_gui()
 
     # ✅ GUI 구성
@@ -155,17 +162,17 @@ class UnifiedUnrealEditorUI:
         tk.Label(self.root, text="🧭 액터 위치 이동").pack()
         slider_frame = tk.Frame(self.root); slider_frame.pack()
 
-        self.scale_x = tk.Scale(slider_frame, from_=-1, to=1, resolution=1,
+        self.scale_x = tk.Scale(slider_frame, from_=-500, to=500, resolution=10,
                                 orient=tk.HORIZONTAL, label="X",
                                 command=lambda v: self.on_slider_change("X", int(v)))
         self.scale_x.set(0); self.scale_x.pack(side=tk.LEFT)
 
-        self.scale_y = tk.Scale(slider_frame, from_=-1, to=1, resolution=1,
+        self.scale_y = tk.Scale(slider_frame, from_=-50, to=50, resolution=10,
                                 orient=tk.HORIZONTAL, label="Y",
                                 command=lambda v: self.on_slider_change("Y", int(v)))
         self.scale_y.set(0); self.scale_y.pack(side=tk.LEFT)
 
-        self.scale_z = tk.Scale(slider_frame, from_=-1, to=1, resolution=1,
+        self.scale_z = tk.Scale(slider_frame, from_=-50, to=50, resolution=10,
                                 orient=tk.HORIZONTAL, label="Z",
                                 command=lambda v: self.on_slider_change("Z", int(v)))
         self.scale_z.set(0); self.scale_z.pack(side=tk.LEFT)
@@ -177,29 +184,70 @@ class UnifiedUnrealEditorUI:
         tk.Button(self.root, text="🧱 에셋 스폰(에디터)",
                   command=lambda: self.spawn_existing_asset("/Game/Scripts/ExportedFBX/house")).pack(pady=4)
 
+        # 🔹 Preset 영역
+        preset_frame = tk.LabelFrame(self.root, text="📦 Scene Preset")
+        preset_frame.pack(fill="x", padx=4, pady=6)
+
+        row = 0
+        tk.Label(preset_frame, text="Name").grid(row=row, column=0, sticky="e", padx=4, pady=2)
+        tk.Entry(preset_frame, textvariable=self.preset_name_var, width=24).grid(row=row, column=1, sticky="w", padx=4, pady=2)
+
+        tk.Checkbutton(preset_frame, text="Only Selected", variable=self.only_selected_var).grid(row=row, column=2, sticky="w", padx=4)
+
+        row += 1
+        tk.Label(preset_frame, text="Offset X/Y/Z").grid(row=row, column=0, sticky="e", padx=4, pady=2)
+        tk.Entry(preset_frame, textvariable=self.offset_x_var, width=6).grid(row=row, column=1, sticky="w", padx=(4,0))
+        tk.Entry(preset_frame, textvariable=self.offset_y_var, width=6).grid(row=row, column=1, sticky="w", padx=(64,0))
+        tk.Entry(preset_frame, textvariable=self.offset_z_var, width=6).grid(row=row, column=1, sticky="w", padx=(124,0))
+
+        row += 1
+        tk.Button(preset_frame, text="💾 Save Preset", command=self.save_preset_btn).grid(row=row, column=0, padx=4, pady=6, sticky="we")
+        tk.Button(preset_frame, text="📥 Load Preset", command=self.load_preset_btn).grid(row=row, column=1, padx=4, pady=6, sticky="we")
+
         self.slot_frame = tk.Frame(self.root); self.slot_frame.pack(pady=5)
 
-    # ✅ 액터 목록 조회
+    # ✅ 액터 목록 조회 (가능하면 9999에 붙어서)
     def load_actor_list(self):
-        result = self.client.send_command("LIST")
-        actors = result.strip().splitlines()
+        # 필요 시 PIE 포트(9999)로 강제 접속
+        if self.client.current_port != self.client.ports[0] or not self.client.sock:
+            if not self.client.connect(self.client.ports[0]):  # 9999
+                self.texture_info.insert(tk.END, "\n❌ PIE(9999) 연결 실패\n")
+                return
+
+        result = self.client.send_command("LIST_STATIC")  # StaticMeshActor만 (서버가 LIST_STATIC 지원 시)
+        if not result.strip():
+            # 구버전 서버 호환: LIST로 폴백
+            result = self.client.send_command("LIST")
+
+        actors = [a for a in result.strip().splitlines() if a]
         self.actor_listbox.delete(0, tk.END)
         for actor in actors:
             self.actor_listbox.insert(tk.END, actor)
 
-    # ✅ 액터 선택 시 처리
+    # ✅ 액터 선택 시 처리 (위치 동기화 + 텍스처 정보)
     def on_actor_selected(self, event):
         selection = self.actor_listbox.curselection()
         if not selection:
             return
         self.selected_actor = self.actor_listbox.get(selection[0])
-        self.position = {"X": 0, "Y": 0, "Z": 0}
 
-        result = self.client.send_command(f"GET_TEXTURES {self.selected_actor}")
+        # 위치 동기화: GET_LOCATION (서버에 구현되어 있어야 함)
+        result = self.client.send_command(f"GET_LOCATION {self.selected_actor}")
+        try:
+            parts = result.strip().split()
+            if len(parts) == 4 and parts[0] == "Location:":
+                self.position["X"] = float(parts[1])
+                self.position["Y"] = float(parts[2])
+                self.position["Z"] = float(parts[3])
+        except Exception as e:
+            print(f"⚠️ 위치 파싱 실패: {e}")
+
+        # 머티리얼/텍스처 정보
+        tex_info = self.client.send_command(f"GET_TEXTURES {self.selected_actor}")
         self.texture_info.delete("1.0", tk.END)
-        self.texture_info.insert(tk.END, result)
+        self.texture_info.insert(tk.END, tex_info)
 
-        slot_lines = [line for line in result.splitlines() if line.startswith("Material Slot")]
+        slot_lines = [line for line in tex_info.splitlines() if line.startswith("Material Slot")]
         self.render_slot_buttons(len(slot_lines))
 
     # ✅ 머티리얼 슬롯 버튼 생성
@@ -223,8 +271,12 @@ class UnifiedUnrealEditorUI:
         if not filepath:
             return
 
-        unreal_path = convert_to_unreal_path(filepath)
-        command = f"SET_MATERIAL {self.selected_actor} {self.selected_slot} {unreal_path}"
+        unreal_path = convert_to_unreal_path(filepath).strip()
+        if not unreal_path:
+            self.texture_info.insert(tk.END, "\n❌ 경로 변환 실패\n")
+            return
+
+        command = f'SET_MATERIAL {self.selected_actor} {self.selected_slot} "{unreal_path}"'
         result = self.client.send_command(command)
         self.texture_info.insert(tk.END, f"\n{result}\n")
 
@@ -256,25 +308,38 @@ class UnifiedUnrealEditorUI:
                 return "❌ Unreal Editor와 연결되지 않았습니다."
         return self.client.send_command(command)
 
-    # ✅ 기존 에셋 경로로 에디터에서 스폰
+    # ✅ 기존 에셋 경로로 에디터에서 스폰 (파이썬을 통해 좌표 지정)
     def spawn_existing_asset(self, unreal_asset_path: str):
-        cmd = f'SPAWN_ASSET "{unreal_asset_path}"'
-        result = self.send_editor_command(cmd)
+        if self.client.current_port != self.client.ports[1] or not self.client.sock:
+            if not self.client.connect(self.client.ports[1]):  # 9998
+                self.texture_info.insert(tk.END, "\n❌ Unreal Editor와 연결되지 않았습니다.\n")
+                return
+        script_path = "D:/git/XR-Studio/MyProjectCamera/Content/Python/editor_spawn_actor.py"
+        cmd = f'py "{script_path}" --asset "{unreal_asset_path}" --spawn --x 1700 --y 0 --z 10'
+        result = self.client.send_command(cmd)
         self.texture_info.insert(tk.END, f"\n{result}\n")
         print(result)
 
-    def import_and_place_fbx(self):
-        filepath = filedialog.askopenfilename(
-            title="FBX 파일 선택",
-            filetypes=[("FBX 파일", "*.fbx")]
-        )
-        if not filepath:
-            return
-        script_path = "D:/git/XR-Studio/MyProjectCamera/Content/Python/editor_spawn_actor.py"
-        cmd = f'py "{script_path}" --fbx "{filepath}" --dest "/Game/Scripts/ExportedFBX" --spawn'
-        result = self.send_editor_command(cmd)
+    # ✅ Preset 저장 버튼 동작
+    def save_preset_btn(self):
+        name = (self.preset_name_var.get() or "Preset").strip()
+        script_path = "D:/git/XR-Studio/MyProjectCamera/Content/Python/editor_scene_preset.py"
+        cmd = f'py "{script_path}" --save-preset --name "{name}"'
+        if self.only_selected_var.get():
+            cmd += " --only-selected"
+        result = self.send_editor_command(cmd)  # 9998 에디터로 보냄
         self.texture_info.insert(tk.END, f"\n{result}\n")
-        print(result)
+
+    # ✅ Preset 로드 버튼 동작
+    def load_preset_btn(self):
+        name = (self.preset_name_var.get() or "Preset").strip()
+        ox = self.offset_x_var.get() or 0.0
+        oy = self.offset_y_var.get() or 0.0
+        oz = self.offset_z_var.get() or 0.0
+        script_path = "D:/git/XR-Studio/MyProjectCamera/Content/Python/editor_scene_preset.py"
+        cmd = f'py "{script_path}" --load-preset --name "{name}" --offset-x {ox} --offset-y {oy} --offset-z {oz}'
+        result = self.send_editor_command(cmd)  # 9998 에디터로 보냄
+        self.texture_info.insert(tk.END, f"\n{result}\n")
 
     # ✅ GUI 실행
     def run(self):

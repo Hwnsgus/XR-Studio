@@ -119,15 +119,30 @@ def spawn_asset(asset_path: str, location=(0,0,100), rotation=(0,0,0), label: st
         actor = unreal.EditorLevelLibrary.spawn_actor_from_object(asset, loc, rot)
 
     if actor:
+        # ✅ 스폰 직후 컴포넌트 Mobility를 Movable로 강제
+        try:
+            # StaticMeshActor 또는 BP 등 다양한 경우를 커버
+            sm_comps = actor.get_components_by_class(unreal.StaticMeshComponent)
+            for c in sm_comps:
+                c.set_editor_property("mobility", unreal.ComponentMobility.MOVABLE)
+
+            # (선택) 다른 프리미티브 컴포넌트에도 적용하고 싶다면:
+            # prim_comps = actor.get_components_by_class(unreal.PrimitiveComponent)
+            # for c in prim_comps:
+            #     c.set_editor_property("mobility", unreal.ComponentMobility.MOVABLE)
+        except Exception as e:
+            unreal.log_warning(f"⚠️ Mobility 설정 실패: {e}")
+
         if label:
             try:
                 actor.set_actor_label(label)
             except Exception:
                 pass
-        unreal.log(f"✅ Spawned: {actor.get_name()}")
+        unreal.log(f"✅ Spawned: {actor.get_name()} (Movable)")
     else:
         unreal.log_warning("❌ 스폰 실패")
     return actor
+
 # (editor_spawn_actor.py 방식):contentReference[oaicite:10]{index=10}
 
 # -------- 엔트리 포인트 --------

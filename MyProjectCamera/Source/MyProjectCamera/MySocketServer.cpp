@@ -7,6 +7,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Editor.h" // GEditor
+#include "Engine/StaticMeshActor.h"
 
 AMySocketServer::AMySocketServer()
 {
@@ -18,6 +19,17 @@ void AMySocketServer::BeginPlay()
     Super::BeginPlay();
     StartListening(9999);
 }
+
+FString AMySocketServer::GetStaticMeshActorNames()
+{
+    FString Result;
+    for (TActorIterator<AStaticMeshActor> It(GetWorld()); It; ++It)
+    {
+        Result += It->GetName() + LINE_TERMINATOR;
+    }
+    return Result;
+}
+
 
 void AMySocketServer::Tick(float DeltaTime)
 {
@@ -81,12 +93,14 @@ void AMySocketServer::Tick(float DeltaTime)
 
         UE_LOG(LogTemp, Warning, TEXT("📩 명령 수신: [%s]"), *Command);
 
+
         TArray<FString> Tokens;
         Command.ParseIntoArrayWS(Tokens);
 
-        if (Tokens.Num() >= 1 && Tokens[0].Equals(TEXT("LIST"), ESearchCase::IgnoreCase))
+        // ✅ 추가: LIST_STATIC (StaticMeshActor만)
+        if (Tokens.Num() >= 1 && Tokens[0].Equals(TEXT("LIST_STATIC"), ESearchCase::IgnoreCase))
         {
-            FString ActorNames = GetAllActorNames();
+            FString ActorNames = GetStaticMeshActorNames();
             SendResponseToPython(ActorNames);
             return;
         }
@@ -130,6 +144,134 @@ void AMySocketServer::AcceptClients()
     }
 }
 
+// 프리셋 로드 
+FString AMySocketServer::CmdLoadPreset(const FString& Name, float Ox, float Oy, float Oz)
+{
+    const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("ScenePresets"), Name + TEXT(".json"));
+    FString Json;
+    if (!FFileHelper::LoadFileToString(Json, *Path))
+        return FString::Printf(TEXT("❌ 프리셋 없음: %s"), *Path);
+
+    TSharedPtr<FJsonObject> Root;
+    const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Json);
+    if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
+        return TEXT("❌ JSON 파싱 실패");
+
+    const TArray<TSharedPtr<FJsonValue>>* Actors;
+    if (!Root->TryGetArrayField(TEXT("actors"), Actors))
+        return TEXT("⚠️ actors 없음");
+
+    int32 Count = 0;
+    for (const TSharedPtr<FJsonValue>& V : *Actors)
+    {
+        const TSharedPtr<FJsonObject> A = V->AsObject();
+        if (!A.IsValid()) continue;
+        FString ClassPath;  A->TryGetStringField(TEXT("class"), ClassPath);
+        if (!ClassPath.EndsWith(TEXT("StaticMeshActor"))) continue;
+
+        FString MeshPath;   A->TryGetStringField(TEXT("static_mesh"), MeshPath);
+        UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *MeshPath);
+        if (!Mesh) continue;
+
+        auto Arr3 = [](const TArray<TSharedPtr<FJsonValue>>& Arr) { return FVector(Arr[0]->AsNumber(), Arr[1]->AsNumber(), Arr[2]->AsNumber()); };
+
+        const TArray<TSharedPtr<FJsonValue>>& LocA = A->GetArrayField(TEXT("location"));
+        const TArray<TSharedPtr<FJsonValue>>& RotA = A->GetArrayField(TEXT("rotation"));
+        const TArray<TSharedPtr<FJsonValue>>& ScaA = A->GetArrayField(TEXT("scale"));
+
+        FVector Loc = Arr3(LocA) + FVector(Ox, Oy, Oz);
+        FRotator Rot(RotA[0]->AsNumber(), RotA[1]->AsNumber(), RotA[2]->AsNumber());
+        FVector S = Arr3(ScaA);
+
+        AStaticMeshActor* SMA = GetWorld()->SpawnActor<AStaticMeshActor>(AStaticMeshActor::StaticClass(), Loc, Rot);
+        if (!SMA) continue;
+
+        UStaticMeshComponent* SMC = SMA->GetStaticMeshComponent();
+        if (SMC)
+        {
+            SMC->SetMobility(EComponentMobility::Movable); // 초기부터 Movable
+            SMC->SetStaticMesh(Mesh);
+            SMC->SetWorldScale3D(S);
+
+            const TArray<TSharedPtr<FJsonValue>>* Mats;
+            if (A->TryGetArrayField(TEXT("materials"), Mats))
+            {
+                int32 Idx = 0;
+                for (const TSharedPtr<FJsonValue>& MV : *Mats)
+                {
+                    const FString MPath = MV->AsString();
+                    if (!MPath.IsEmpty())
+                    {
+                        if (UMaterialInterface* MI = LoadObject<UMaterialInterface>(nullptr, *MPath))
+                            SMC->SetMaterial(Idx, MI);
+                    }
+                    ++Idx;
+                }
+            }
+        }
+
+        FString Label;
+        if (A->TryGetStringField(TEXT("label"), Label)) { SMA->SetActorLabel(Label); }
+        ++Count;
+    }
+    return FString::Printf(TEXT("OK Loaded %d"), Count);
+}
+
+// 현재 씬의 모든 StaticMeshActor를 JSON으로 저장
+FString AMySocketServer::CmdSavePreset(const FString& Name)
+{
+    TArray<TSharedPtr<FJsonValue>> OutActors;
+    for (TActorIterator<AStaticMeshActor> It(GetWorld()); It; ++It)
+    {
+        AStaticMeshActor* A = *It;
+        UStaticMeshComponent* C = A->GetStaticMeshComponent();
+        if (!C || !C->GetStaticMesh()) continue;
+
+        TSharedPtr<FJsonObject> O = MakeShared<FJsonObject>();
+        O->SetStringField(TEXT("label"), A->GetActorLabel());
+        O->SetStringField(TEXT("class"), TEXT("/Script/Engine.StaticMeshActor"));
+        const FVector L = A->GetActorLocation();
+        const FRotator R = A->GetActorRotation();
+        const FVector S = A->GetActorScale3D();
+        auto Vec = [](const FVector& V) { TArray<TSharedPtr<FJsonValue>> A; A.Add(MakeShared<FJsonValueNumber>(V.X)); A.Add(MakeShared<FJsonValueNumber>(V.Y)); A.Add(MakeShared<FJsonValueNumber>(V.Z)); return A; };
+        auto Rot = [](const FRotator& R) { TArray<TSharedPtr<FJsonValue>> A; A.Add(MakeShared<FJsonValueNumber>(R.Pitch)); A.Add(MakeShared<FJsonValueNumber>(R.Yaw)); A.Add(MakeShared<FJsonValueNumber>(R.Roll)); return A; };
+        O->SetArrayField(TEXT("location"), Vec(L));
+        O->SetArrayField(TEXT("rotation"), Rot(R));
+        O->SetArrayField(TEXT("scale"), Vec(S));
+        O->SetStringField(TEXT("static_mesh"), C->GetStaticMesh()->GetPathName());
+        // materials
+        TArray<TSharedPtr<FJsonValue>> Mats;
+        const int32 MCount = C->GetNumMaterials();
+        for (int32 i = 0; i < MCount; ++i)
+        {
+            if (UMaterialInterface* MI = C->GetMaterial(i))
+                Mats.Add(MakeShared<FJsonValueString>(MI->GetPathName()));
+            else
+                Mats.Add(MakeShared<FJsonValueString>(TEXT("")));
+        }
+        O->SetArrayField(TEXT("materials"), Mats);
+        O->SetStringField(TEXT("mobility"), TEXT("MOVABLE")); // 런타임 저장에선 간단화
+
+        OutActors.Add(MakeShared<FJsonValueObject>(O));
+    }
+
+    TSharedPtr<FJsonObject> Root = MakeShared<FJsonObject>();
+    Root->SetNumberField(TEXT("version"), 1);
+    Root->SetStringField(TEXT("name"), Name);
+    Root->SetArrayField(TEXT("actors"), OutActors);
+
+    FString JsonOut;
+    const TSharedRef<TJsonWriter<>> W = TJsonWriterFactory<>::Create(&JsonOut);
+    FJsonSerializer::Serialize(Root.ToSharedRef(), W);
+
+    const FString Path = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("ScenePresets"), Name + TEXT(".json"));
+    IFileManager::Get().MakeDirectory(*FPaths::GetPath(Path), true);
+    if (!FFileHelper::SaveStringToFile(JsonOut, *Path))
+        return TEXT("❌ 저장 실패");
+    return FString::Printf(TEXT("OK Saved: %s"), *Path);
+}
+
+
 FString AMySocketServer::HandleCommand(const FString& Command)
 {
     TArray<FString> Tokens;
@@ -166,6 +308,22 @@ FString AMySocketServer::HandleCommand(const FString& Command)
         }
         return FString::Printf(TEXT("❌ '%s' 이름의 액터를 찾을 수 없음"), *ActorName);
     }
+
+    else if (Tokens[0] == "GET_LOCATION" && Tokens.Num() >= 2)
+    {
+        FString ActorName = Tokens[1];
+
+        for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+        {
+            if (It->GetName().Equals(ActorName, ESearchCase::IgnoreCase))
+            {
+                FVector Loc = It->GetActorLocation();
+                return FString::Printf(TEXT("Location: %.1f %.1f %.1f"), Loc.X, Loc.Y, Loc.Z);
+            }
+        }
+        return FString::Printf(TEXT("❌ 액터 '%s'을(를) 찾을 수 없습니다."), *ActorName);
+    }
+
 
     else if (Tokens[0] == "SET_TEXTURE" && Tokens.Num() >= 5)
     {
@@ -241,14 +399,32 @@ FString AMySocketServer::HandleCommand(const FString& Command)
         return FString::Printf(TEXT("❌ '%s' 이름의 액터를 찾을 수 없음"), *ActorName);
     }
 
-
     else if (Tokens[0] == "SET_MATERIAL" && Tokens.Num() >= 4)
     {
         FString ActorName = Tokens[1];
         int32 SlotIndex = FCString::Atoi(*Tokens[2]);
-        FString MaterialPath = Tokens[3];
 
-        UMaterialInterface* NewMaterial = Cast<UMaterialInterface>(StaticLoadObject(UMaterialInterface::StaticClass(), nullptr, *MaterialPath));
+        // 3번 인덱스부터 끝까지 다시 합쳐 경로 복원
+        FString MaterialPath;
+        {
+            TArray<FString> TailTokens;
+            for (int32 i = 3; i < Tokens.Num(); ++i) { TailTokens.Add(Tokens[i]); }
+            MaterialPath = FString::Join(TailTokens, TEXT(" "));
+
+            // 에디터 서브시스템의 CleanArg와 유사한 정리: 개행/따옴표 제거
+            MaterialPath.ReplaceInline(TEXT("\r"), TEXT(""));
+            MaterialPath.ReplaceInline(TEXT("\n"), TEXT(""));
+            MaterialPath.TrimStartAndEndInline();
+            if ((MaterialPath.StartsWith(TEXT("\"")) && MaterialPath.EndsWith(TEXT("\""))) ||
+                (MaterialPath.StartsWith(TEXT("'")) && MaterialPath.EndsWith(TEXT("'"))))
+            {
+                MaterialPath = MaterialPath.Mid(1, MaterialPath.Len() - 2);
+                MaterialPath.TrimStartAndEndInline();
+            }
+        }
+
+        UMaterialInterface* NewMaterial =
+            Cast<UMaterialInterface>(StaticLoadObject(UMaterialInterface::StaticClass(), nullptr, *MaterialPath));
         if (!NewMaterial) return TEXT("❌ 머티리얼 로드 실패");
 
         for (TActorIterator<AActor> It(GetWorld()); It; ++It)
@@ -260,17 +436,15 @@ FString AMySocketServer::HandleCommand(const FString& Command)
 
                 for (UStaticMeshComponent* MeshComp : MeshComponents)
                 {
-                    if (MeshComp->GetNumMaterials() <= SlotIndex)
-                        continue;
-
+                    if (MeshComp->GetNumMaterials() <= SlotIndex) continue;
                     MeshComp->SetMaterial(SlotIndex, NewMaterial);
                     return FString::Printf(TEXT("✅ '%s'의 %d번 슬롯 머티리얼 교체 성공"), *ActorName, SlotIndex);
                 }
             }
         }
-
         return TEXT("❌ 적용 실패 (액터 또는 슬롯 없음)");
-    }
+        }
+
 
     else if (Tokens[0] == "GET_MATERIALS")
     {
@@ -321,7 +495,22 @@ FString AMySocketServer::HandleCommand(const FString& Command)
 #else
         return TEXT("❌ 에디터 모드에서만 사용 가능합니다.");
 #endif
-}
+    }
+
+    else if (Tokens[0] == "LOAD_PRESET" && Tokens.Num() >= 2)
+    {
+        const FString Name = Tokens[1];
+        float Ox = 0, Oy = 0, Oz = 0;
+        if (Tokens.Num() >= 5) { Ox = FCString::Atof(*Tokens[2]); Oy = FCString::Atof(*Tokens[3]); Oz = FCString::Atof(*Tokens[4]); }
+        return CmdLoadPreset(Name, Ox, Oy, Oz);
+        }
+
+        // (원하면) 저장도:
+    else if (Tokens[0] == "SAVE_PRESET" && Tokens.Num() >= 2)
+    {
+        const FString Name = Tokens[1];
+        return CmdSavePreset(Name);
+        }
 
 
     return TEXT("❌ 알 수 없는 명령");
