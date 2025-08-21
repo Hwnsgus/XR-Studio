@@ -7,7 +7,14 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "Editor.h" // GEditor
+
 #include "Engine/StaticMeshActor.h"
+#include "Dom/JsonObject.h"
+#include "Dom/JsonValue.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonWriter.h"
+#include "EngineUtils.h"
 
 AMySocketServer::AMySocketServer()
 {
@@ -443,7 +450,61 @@ FString AMySocketServer::HandleCommand(const FString& Command)
             }
         }
         return TEXT("❌ 적용 실패 (액터 또는 슬롯 없음)");
+    }
+
+
+        // ✅ 추가: 액터의 StaticMesh를 교체
+    else if (Tokens[0] == "SET_STATIC_MESH" && Tokens.Num() >= 3)
+    {
+        FString ActorName = Tokens[1];
+
+        // 경로 재조립 + 따옴표/개행 정리
+        FString MeshPath;
+        {
+            TArray<FString> Tail;
+            for (int32 i = 2; i < Tokens.Num(); ++i) Tail.Add(Tokens[i]);
+            MeshPath = FString::Join(Tail, TEXT(" "));
+            MeshPath.ReplaceInline(TEXT("\r"), TEXT("")); MeshPath.ReplaceInline(TEXT("\n"), TEXT(""));
+            MeshPath.TrimStartAndEndInline();
+            if ((MeshPath.StartsWith(TEXT("\"")) && MeshPath.EndsWith(TEXT("\""))) ||
+                (MeshPath.StartsWith(TEXT("'")) && MeshPath.EndsWith(TEXT("'"))))
+            {
+                MeshPath = MeshPath.Mid(1, MeshPath.Len() - 2);
+                MeshPath.TrimStartAndEndInline();
+            }
+            // "/Game/Foo/Bar" → "/Game/Foo/Bar.Bar" 자동보정
+            if (!MeshPath.Contains(TEXT(".")))
+            {
+                const FString Short = FPackageName::GetShortName(MeshPath);
+                MeshPath += TEXT(".") + Short;
+            }
         }
+
+        UStaticMesh* NewMesh = Cast<UStaticMesh>(StaticLoadObject(UStaticMesh::StaticClass(), nullptr, *MeshPath));
+        if (!NewMesh) return FString::Printf(TEXT("❌ StaticMesh 로드 실패: %s"), *MeshPath);
+
+        for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+        {
+            if (It->GetName().Equals(ActorName, ESearchCase::IgnoreCase))
+            {
+                int32 Applied = 0;
+                TArray<UStaticMeshComponent*> Comps;
+                It->GetComponents<UStaticMeshComponent>(Comps);
+                for (UStaticMeshComponent* C : Comps)
+                {
+                    C->SetMobility(EComponentMobility::Movable); // 처음부터 Movable 유지
+                    C->SetStaticMesh(NewMesh);
+                    C->MarkRenderStateDirty();
+                    ++Applied;
+                }
+                return Applied > 0
+                    ? FString::Printf(TEXT("✅ '%s' 메쉬 교체 성공: %s"), *ActorName, *NewMesh->GetName())
+                    : TEXT("⚠️ StaticMeshComponent가 없습니다.");
+            }
+        }
+        return FString::Printf(TEXT("❌ '%s' 이름의 액터를 찾을 수 없음"), *ActorName);
+        }
+
 
 
     else if (Tokens[0] == "GET_MATERIALS")

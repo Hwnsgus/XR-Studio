@@ -15,7 +15,7 @@ public class MyProjectCamera : ModuleRules
         if (Target.bBuildEditor)
         {
 		PrivateDependencyModuleNames.AddRange(new string[] {
-			"UnrealEd", "EditorSubsystem", "Slate", "SlateCore",  "AssetRegistry"
+			"UnrealEd", "EditorSubsystem", "Slate", "SlateCore",  "AssetRegistry",   "Json", "JsonUtilities"
             });
         }
 

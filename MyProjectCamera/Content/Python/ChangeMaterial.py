@@ -1,3 +1,4 @@
+import os
 import socket
 import time
 import tkinter as tk
@@ -121,7 +122,7 @@ class UnrealSocketClient:
             return f"❌ 통신 오류: {e}"
 
 
-# 2️⃣ 경로 변환 (윈도우 → 언리얼 경로)
+# 2️⃣ 경로 변환 (윈도우 → 언리얼 경로, uasset 전용)
 def convert_to_unreal_path(filepath):
     path = filepath.replace("D:/git/XR-Studio/MyProjectCamera/Content", "/Game")
     path = path.replace("\\", "/")
@@ -181,8 +182,12 @@ class UnifiedUnrealEditorUI:
         self.texture_info = tk.Text(self.root, height=15, width=60)
         self.texture_info.pack()
 
-        tk.Button(self.root, text="🧱 에셋 스폰(에디터)",
-                  command=lambda: self.spawn_existing_asset("/Game/Scripts/ExportedFBX/house")).pack(pady=4)
+        # 에셋/프리셋/교체 버튼들
+        btn_frame = tk.Frame(self.root); btn_frame.pack(pady=6)
+        tk.Button(btn_frame, text="🧱 에셋 스폰(에디터)",
+                  command=lambda: self.spawn_existing_asset("/Game/Scripts/ExportedFBX/house")).grid(row=0, column=0, padx=4)
+
+        tk.Button(btn_frame, text="🗽 Replace Mesh (FBX)", command=self.replace_mesh_with_fbx).grid(row=0, column=1, padx=4)
 
         # 🔹 Preset 영역
         preset_frame = tk.LabelFrame(self.root, text="📦 Scene Preset")
@@ -191,7 +196,6 @@ class UnifiedUnrealEditorUI:
         row = 0
         tk.Label(preset_frame, text="Name").grid(row=row, column=0, sticky="e", padx=4, pady=2)
         tk.Entry(preset_frame, textvariable=self.preset_name_var, width=24).grid(row=row, column=1, sticky="w", padx=4, pady=2)
-
         tk.Checkbutton(preset_frame, text="Only Selected", variable=self.only_selected_var).grid(row=row, column=2, sticky="w", padx=4)
 
         row += 1
@@ -208,15 +212,14 @@ class UnifiedUnrealEditorUI:
 
     # ✅ 액터 목록 조회 (가능하면 9999에 붙어서)
     def load_actor_list(self):
-        # 필요 시 PIE 포트(9999)로 강제 접속
+        # 가능하면 PIE 포트(9999)에 접속
         if self.client.current_port != self.client.ports[0] or not self.client.sock:
             if not self.client.connect(self.client.ports[0]):  # 9999
                 self.texture_info.insert(tk.END, "\n❌ PIE(9999) 연결 실패\n")
                 return
 
-        result = self.client.send_command("LIST_STATIC")  # StaticMeshActor만 (서버가 LIST_STATIC 지원 시)
+        result = self.client.send_command("LIST_STATIC")  # 서버가 LIST_STATIC 지원 시 StaticMeshActor만
         if not result.strip():
-            # 구버전 서버 호환: LIST로 폴백
             result = self.client.send_command("LIST")
 
         actors = [a for a in result.strip().splitlines() if a]
@@ -231,7 +234,7 @@ class UnifiedUnrealEditorUI:
             return
         self.selected_actor = self.actor_listbox.get(selection[0])
 
-        # 위치 동기화: GET_LOCATION (서버에 구현되어 있어야 함)
+        # 위치 동기화: GET_LOCATION (서버 구현 필요)
         result = self.client.send_command(f"GET_LOCATION {self.selected_actor}")
         try:
             parts = result.strip().split()
@@ -320,26 +323,78 @@ class UnifiedUnrealEditorUI:
         self.texture_info.insert(tk.END, f"\n{result}\n")
         print(result)
 
-    # ✅ Preset 저장 버튼 동작
+    # ✅ Preset 저장 버튼
     def save_preset_btn(self):
         name = (self.preset_name_var.get() or "Preset").strip()
         script_path = "D:/git/XR-Studio/MyProjectCamera/Content/Python/editor_scene_preset.py"
-        cmd = f'py "{script_path}" --save-preset --name "{name}"'
-        if self.only_selected_var.get():
-            cmd += " --only-selected"
-        result = self.send_editor_command(cmd)  # 9998 에디터로 보냄
-        self.texture_info.insert(tk.END, f"\n{result}\n")
 
-    # ✅ Preset 로드 버튼 동작
+        # PIE면 런타임 커맨드, 아니면 에디터 py
+        if self.client.connect(self.client.ports[0]):  # 9999
+            resp = self.client.send_command(f"SAVE_PRESET {name}")
+        else:
+            cmd = f'py "{script_path}" --save-preset --name "{name}"'
+            if self.only_selected_var.get():
+                cmd += " --only-selected"
+            resp = self.send_editor_command(cmd)  # 9998
+        self.texture_info.insert(tk.END, f"\n{resp}\n")
+
+    # ✅ Preset 로드 버튼 (파일 탐색기)
     def load_preset_btn(self):
-        name = (self.preset_name_var.get() or "Preset").strip()
+        preset_dir = r"D:\git\XR-Studio\MyProjectCamera\Saved\ScenePresets"
+        filepath = filedialog.askopenfilename(
+            title="로드할 프리셋(.json) 선택",
+            initialdir=preset_dir,
+            filetypes=[("Scene Preset JSON", "*.json")]
+        )
+        if not filepath:
+            return
+
+        name = os.path.splitext(os.path.basename(filepath))[0]
         ox = self.offset_x_var.get() or 0.0
         oy = self.offset_y_var.get() or 0.0
         oz = self.offset_z_var.get() or 0.0
+
         script_path = "D:/git/XR-Studio/MyProjectCamera/Content/Python/editor_scene_preset.py"
-        cmd = f'py "{script_path}" --load-preset --name "{name}" --offset-x {ox} --offset-y {oy} --offset-z {oz}'
-        result = self.send_editor_command(cmd)  # 9998 에디터로 보냄
-        self.texture_info.insert(tk.END, f"\n{result}\n")
+
+        if self.client.connect(self.client.ports[0]):  # 9999
+            resp = self.client.send_command(f"LOAD_PRESET {name} {ox} {oy} {oz}")
+        else:
+            cmd = f'py "{script_path}" --load-preset --name "{name}" --offset-x {ox} --offset-y {oy} --offset-z {oz}'
+            resp = self.send_editor_command(cmd)  # 9998
+        self.texture_info.insert(tk.END, f"\n{resp}\n")
+
+    # ✅ Replace Mesh( FBX import → SET_STATIC_MESH )
+    def replace_mesh_with_fbx(self):
+        if not self.selected_actor:
+            self.texture_info.insert(tk.END, "\n❌ 먼저 액터를 선택하세요.\n")
+            return
+
+        fbx = filedialog.askopenfilename(
+            title="교체할 FBX 선택",
+            filetypes=[("FBX 파일", "*.fbx")]
+        )
+        if not fbx:
+            return
+
+        # 1) 에디터에 임포트 (스폰 없이)
+        script_path = "D:/git/XR-Studio/MyProjectCamera/Content/Python/editor_spawn_actor.py"
+        dest = "/Game/Scripts/ExportedFBX"
+        cmd_import = f'py "{script_path}" --fbx "{fbx}" --dest "{dest}"'
+        resp = self.send_editor_command(cmd_import)  # 9998
+        self.texture_info.insert(tk.END, f"\n{resp}\n")
+
+        # 2) 에셋 경로 산출 (/Game/.../<name>)
+        name = os.path.splitext(os.path.basename(fbx))[0]
+        unreal_asset_short = f"{dest}/{name}"  # 점 없는 경로 (서버가 자동 보정하도록 구현)
+
+        # 3) SET_STATIC_MESH 전송: PIE 우선, 실패 시 에디터로
+        cmd_set = f'SET_STATIC_MESH {self.selected_actor} "{unreal_asset_short}"'
+        if self.client.connect(self.client.ports[0]):  # 9999
+            resp2 = self.client.send_command(cmd_set)
+        else:
+            # 에디터에서도 동일 명령 지원
+            resp2 = self.send_editor_command(cmd_set)
+        self.texture_info.insert(tk.END, f"\n{resp2}\n")
 
     # ✅ GUI 실행
     def run(self):

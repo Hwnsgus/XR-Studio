@@ -12,6 +12,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"  // UAssetRegistryHelpers, FAssetData
 #include "AssetRegistry/IAssetRegistry.h"       // IAssetRegistry 인터페이스
 #include "UObject/SoftObjectPath.h"             // FSoftObjectPath
+#include "EngineUtils.h"
 
 #define UE_LOG_TAG LogTemp
 
@@ -193,7 +194,6 @@ static UObject* LoadAnyObjectByPath(const FString& InPath)
 
     return nullptr;
 }
-
 void UMyEditorSocketSubsystem::HandleIncomingCommand(const FString& Command)
 {
     // 에디터 전용 가드 (PIE 차단)
@@ -203,8 +203,6 @@ void UMyEditorSocketSubsystem::HandleIncomingCommand(const FString& Command)
         SendToClient(TEXT("ERR PIE\n"));
         return;
     }
-
-    // ... (앞부분 동일)
 
     if (Command.StartsWith(TEXT("SPAWN_ASSET")))
     {
@@ -255,21 +253,10 @@ void UMyEditorSocketSubsystem::HandleIncomingCommand(const FString& Command)
 
         if (MeshActor && MeshActor->GetStaticMeshComponent())
         {
-            UStaticMeshComponent* SMC = MeshActor->GetStaticMeshComponent();
-
-            // ✅ 먼저 Mobility를 Movable로
-            SMC->SetMobility(EComponentMobility::Movable);
-
-            // ✅ 메시에 할당
-            SMC->SetStaticMesh(StaticMesh);
-
-            // (선택) 라벨
+            MeshActor->GetStaticMeshComponent()->SetMobility(EComponentMobility::Movable);
+            MeshActor->GetStaticMeshComponent()->SetStaticMesh(StaticMesh);
             MeshActor->SetActorLabel(TEXT("Spawned_StaticMesh"));
-
-            // (선택) 즉시 렌더 상태 반영
-            SMC->MarkRenderStateDirty();
-
-            UE_LOG(UE_LOG_TAG, Log, TEXT("✅ Spawned Movable: %s"), *MeshActor->GetName());
+            UE_LOG(UE_LOG_TAG, Log, TEXT("✅ Spawned: %s"), *MeshActor->GetName());
             SendToClient(TEXT("OK Spawned\n"));
             return;
         }
@@ -279,6 +266,78 @@ void UMyEditorSocketSubsystem::HandleIncomingCommand(const FString& Command)
         return;
     }
 
+    // ✅ 추가: 에디터에서도 액터 메쉬 교체
+    if (Command.StartsWith(TEXT("SET_STATIC_MESH ")))
+    {
+        auto CleanArg = [](FString S)
+            {
+                S.ReplaceInline(TEXT("\r"), TEXT(""));
+                S.ReplaceInline(TEXT("\n"), TEXT(""));
+                S.TrimStartAndEndInline();
+
+                if ((S.StartsWith(TEXT("\"")) && S.EndsWith(TEXT("\""))) ||
+                    (S.StartsWith(TEXT("'")) && S.EndsWith(TEXT("'"))))
+                {
+                    S = S.Mid(1, S.Len() - 2);
+                    S.TrimStartAndEndInline();
+                }
+                return S;
+            };
+
+        // "SET_STATIC_MESH " 길이
+        const int32 PrefixLen = 16;
+        FString Rest = Command.Mid(PrefixLen).TrimStartAndEnd();
+
+        // 첫 공백까지 ActorName, 나머지는 경로
+        FString ActorName, AssetArg;
+        if (!Rest.Split(TEXT(" "), &ActorName, &AssetArg))
+        {
+            SendToClient(TEXT("ERR Args\n"));
+            return;
+        }
+
+        FString MeshPath = CleanArg(AssetArg);
+        if (!MeshPath.Contains(TEXT(".")))
+        {
+            const FString Short = FPackageName::GetShortName(MeshPath);
+            MeshPath += TEXT(".") + Short;
+        }
+
+        UStaticMesh* NewMesh = Cast<UStaticMesh>(LoadAnyObjectByPath(MeshPath));
+        if (!NewMesh)
+        {
+            SendToClient(TEXT("ERR LoadMesh\n"));
+            return;
+        }
+
+        UWorld* EditorWorld = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+        if (!EditorWorld)
+        {
+            SendToClient(TEXT("ERR NoWorld\n"));
+            return;
+        }
+
+        int32 Applied = 0;
+        for (TActorIterator<AActor> It(EditorWorld); It; ++It)
+        {
+            if (It->GetName().Equals(ActorName, ESearchCase::IgnoreCase))
+            {
+                TArray<UStaticMeshComponent*> Comps;
+                It->GetComponents<UStaticMeshComponent>(Comps);
+                for (UStaticMeshComponent* C : Comps)
+                {
+                    C->SetMobility(EComponentMobility::Movable);
+                    C->SetStaticMesh(NewMesh);
+                    C->MarkRenderStateDirty();
+                    ++Applied;
+                }
+                break;
+            }
+        }
+
+        SendToClient(Applied > 0 ? TEXT("OK SetMesh\n") : TEXT("ERR NoSMC\n"));
+        return;
+    }
 
     if (Command.StartsWith(TEXT("py ")))
     {
@@ -299,6 +358,7 @@ void UMyEditorSocketSubsystem::HandleIncomingCommand(const FString& Command)
     UE_LOG(UE_LOG_TAG, Warning, TEXT("⚠️ 알 수 없는 명령: %s"), *Command);
     SendToClient(TEXT("ERR Unknown\n"));
 }
+
 
 
 void UMyEditorSocketSubsystem::ExecPython(const FString& PyCommand)
