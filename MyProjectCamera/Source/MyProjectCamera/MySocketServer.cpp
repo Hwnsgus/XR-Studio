@@ -9,6 +9,7 @@
 #include "Editor.h" // GEditor
 
 #include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Serialization/JsonSerializer.h"
@@ -329,6 +330,47 @@ FString AMySocketServer::HandleCommand(const FString& Command)
             }
         }
         return FString::Printf(TEXT("❌ 액터 '%s'을(를) 찾을 수 없습니다."), *ActorName);
+    }
+
+
+    else if (Tokens[0] == "GET_SCALE" && Tokens.Num() >= 2)
+    {
+        const FString ActorName = Tokens[1];
+        for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+        {
+            if (It->GetName().Equals(ActorName, ESearchCase::IgnoreCase))
+            {
+                const FVector S = It->GetActorScale3D();
+                return FString::Printf(TEXT("Scale: %.6f %.6f %.6f"), S.X, S.Y, S.Z);
+            }
+        }
+        return FString::Printf(TEXT("❌ '%s' 이름의 액터를 찾을 수 없음"), *ActorName);
+    }
+
+    else if (Tokens[0] == "SCALE" && Tokens.Num() >= 5)
+    {
+        const FString ActorName = Tokens[1];
+        const float Sx = FCString::Atof(*Tokens[2]);
+        const float Sy = FCString::Atof(*Tokens[3]);
+        const float Sz = FCString::Atof(*Tokens[4]);
+
+        for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+        {
+            if (It->GetName().Equals(ActorName, ESearchCase::IgnoreCase))
+            {
+                // StaticMeshComponent가 있으면 Movable로 풀어주기 (편의)
+                TArray<UStaticMeshComponent*> Comps;
+                It->GetComponents<UStaticMeshComponent>(Comps);
+                for (UStaticMeshComponent* C : Comps)
+                {
+                    C->SetMobility(EComponentMobility::Movable);
+                }
+
+                It->SetActorScale3D(FVector(Sx, Sy, Sz));
+                return FString::Printf(TEXT("OK Scale %.3f %.3f %.3f"), Sx, Sy, Sz);
+            }
+        }
+        return FString::Printf(TEXT("❌ '%s' 이름의 액터를 찾을 수 없음"), *ActorName);
     }
 
 

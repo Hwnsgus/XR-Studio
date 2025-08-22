@@ -355,6 +355,63 @@ void UMyEditorSocketSubsystem::HandleIncomingCommand(const FString& Command)
         return;
     }
 
+
+    if (Command.StartsWith(TEXT("GET_SCALE ")))
+    {
+        FString ActorName = Command.Mid(10).TrimStartAndEnd();
+        UWorld* EditorWorld = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+        if (!EditorWorld) { SendToClient(TEXT("ERR NoWorld\n")); return; }
+
+        for (TActorIterator<AActor> It(EditorWorld); It; ++It)
+        {
+            if (It->GetName().Equals(ActorName, ESearchCase::IgnoreCase))
+            {
+                const FVector S = It->GetActorScale3D();
+                SendToClient(FString::Printf(TEXT("Scale: %.6f %.6f %.6f\n"), S.X, S.Y, S.Z));
+                return;
+            }
+        }
+        SendToClient(TEXT("ERR NotFound\n"));
+        return;
+    }
+
+    if (Command.StartsWith(TEXT("SCALE ")))
+    {
+        FString Rest = Command.Mid(6).TrimStartAndEnd();
+        FString ActorName, SX, SY, SZ;
+        if (!Rest.Split(TEXT(" "), &ActorName, &Rest) ||
+            !Rest.Split(TEXT(" "), &SX, &Rest) ||
+            !Rest.Split(TEXT(" "), &SY, &SZ))
+        {
+            SendToClient(TEXT("ERR Args\n")); return;
+        }
+
+        const float Sx = FCString::Atof(*SX);
+        const float Sy = FCString::Atof(*SY);
+        const float Sz = FCString::Atof(*SZ);
+
+        UWorld* EditorWorld = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+        if (!EditorWorld) { SendToClient(TEXT("ERR NoWorld\n")); return; }
+
+        for (TActorIterator<AActor> It(EditorWorld); It; ++It)
+        {
+            if (It->GetName().Equals(ActorName, ESearchCase::IgnoreCase))
+            {
+                // Movable 보장
+                TArray<UStaticMeshComponent*> Comps;
+                It->GetComponents<UStaticMeshComponent>(Comps);
+                for (UStaticMeshComponent* C : Comps)
+                    C->SetMobility(EComponentMobility::Movable);
+
+                It->SetActorScale3D(FVector(Sx, Sy, Sz));
+                SendToClient(TEXT("OK Scale\n"));
+                return;
+            }
+        }
+        SendToClient(TEXT("ERR NotFound\n"));
+        return;
+    }
+
     UE_LOG(UE_LOG_TAG, Warning, TEXT("⚠️ 알 수 없는 명령: %s"), *Command);
     SendToClient(TEXT("ERR Unknown\n"));
 }
