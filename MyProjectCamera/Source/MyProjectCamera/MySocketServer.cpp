@@ -105,14 +105,6 @@ void AMySocketServer::Tick(float DeltaTime)
         TArray<FString> Tokens;
         Command.ParseIntoArrayWS(Tokens);
 
-        // ✅ 추가: LIST_STATIC (StaticMeshActor만)
-        if (Tokens.Num() >= 1 && Tokens[0].Equals(TEXT("LIST_STATIC"), ESearchCase::IgnoreCase))
-        {
-            FString ActorNames = GetStaticMeshActorNames();
-            SendResponseToPython(ActorNames);
-            return;
-        }
-
         FString Result = HandleCommand(Command);
         SendResponseToPython(Result);
     }
@@ -317,6 +309,31 @@ FString AMySocketServer::HandleCommand(const FString& Command)
         return FString::Printf(TEXT("❌ '%s' 이름의 액터를 찾을 수 없음"), *ActorName);
     }
 
+
+
+    // StaticMeshActor만 라벨/네임
+    else if (Tokens[0] == "LIST_STATIC")
+    {
+        FString Out;
+        for (TActorIterator<AStaticMeshActor> It(GetWorld()); It; ++It)
+        {
+            const FString Name = It->GetName();
+
+#if WITH_EDITOR
+            const FString Label = It->GetActorLabel(/*bIncludeCounts=*/true);
+            UE_LOG(LogTemp, Warning, TEXT("🎯 라벨: %s | 이름: %s"), *Label, *Name);
+#else
+            const FString Label = Name;
+#endif
+
+            Out += FString::Printf(TEXT("%s|%s\n"), *Label, *Name);
+        }
+
+        return Out.IsEmpty() ? TEXT("\n") : Out;
+    }
+
+
+
     else if (Tokens[0] == "GET_LOCATION" && Tokens.Num() >= 2)
     {
         FString ActorName = Tokens[1];
@@ -347,6 +364,37 @@ FString AMySocketServer::HandleCommand(const FString& Command)
         return FString::Printf(TEXT("❌ '%s' 이름의 액터를 찾을 수 없음"), *ActorName);
     }
 
+
+    else if (Tokens[0] == "GET_MATERIAL_SLOTS" && Tokens.Num() >= 2)
+    {
+        FString ActorName = Tokens[1];
+        for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+        {
+            if (It->GetName().Equals(ActorName, ESearchCase::IgnoreCase))
+            {
+                FString Result;
+                TArray<UStaticMeshComponent*> MeshComponents;
+                It->GetComponents<UStaticMeshComponent>(MeshComponents);
+
+                for (UStaticMeshComponent* MeshComp : MeshComponents)
+                {
+                    int32 MatCount = MeshComp->GetNumMaterials();
+                    for (int32 i = 0; i < MatCount; ++i)
+                    {
+                        UMaterialInterface* Mat = MeshComp->GetMaterial(i);
+                        FString MatName = Mat ? Mat->GetName() : TEXT("None");
+                        Result += FString::Printf(TEXT("Material Slot %d: %s\n"), i, *MatName);
+                    }
+                }
+
+                return Result.IsEmpty() ? TEXT("⚠️ 머티리얼 없음\n") : Result;
+            }
+        }
+
+        return FString::Printf(TEXT("❌ '%s' 이름의 액터를 찾을 수 없음"), *ActorName);
+    }
+
+
     else if (Tokens[0] == "SCALE" && Tokens.Num() >= 5)
     {
         const FString ActorName = Tokens[1];
@@ -372,6 +420,25 @@ FString AMySocketServer::HandleCommand(const FString& Command)
         }
         return FString::Printf(TEXT("❌ '%s' 이름의 액터를 찾을 수 없음"), *ActorName);
     }
+
+    else if (Tokens[0] == "MOVE_COMMIT" && Tokens.Num() >= 5)
+    {
+        FString ActorName = Tokens[1];
+        float X = FCString::Atof(*Tokens[2]);
+        float Y = FCString::Atof(*Tokens[3]);
+        float Z = FCString::Atof(*Tokens[4]);
+
+        for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+        {
+            if (It->GetName().Equals(ActorName, ESearchCase::IgnoreCase))
+            {
+                It->SetActorLocation(FVector(X, Y, Z));
+                return FString::Printf(TEXT("✅ %s 위치 커밋 완료: (%.1f, %.1f, %.1f)"), *ActorName, X, Y, Z);
+            }
+        }
+        return FString::Printf(TEXT("❌ '%s' 이름의 액터를 찾을 수 없음"), *ActorName);
+        }
+
 
 
     else if (Tokens[0] == "SET_TEXTURE" && Tokens.Num() >= 5)
@@ -549,26 +616,6 @@ FString AMySocketServer::HandleCommand(const FString& Command)
 
 
 
-    else if (Tokens[0] == "GET_MATERIALS")
-    {
-        FString Path = Tokens.Num() >= 2 ? Tokens[1] : "/Game";
-        TArray<FAssetData> Assets;
-        FARFilter Filter;
-        Filter.ClassPaths.Add(UMaterialInterface::StaticClass()->GetClassPathName());
-        Filter.PackagePaths.Add(*Path);
-        Filter.bRecursivePaths = true;
-
-        FAssetRegistryModule& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
-        AssetRegistry.Get().GetAssets(Filter, Assets);
-
-        FString Result;
-        for (const FAssetData& Asset : Assets)
-        {
-            Result += Asset.GetObjectPathString() + LINE_TERMINATOR;
-        }
-
-        return Result.IsEmpty() ? TEXT("⚠️ 머티리얼 없음") : Result;
-    }
 
     else if (Tokens[0] == "GET_BLUEPRINTS")
     {

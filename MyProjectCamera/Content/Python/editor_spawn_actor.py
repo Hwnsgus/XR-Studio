@@ -133,11 +133,14 @@ def spawn_asset(asset_path: str, location=(0,0,100), rotation=(0,0,0), label: st
         except Exception as e:
             unreal.log_warning(f"⚠️ Mobility 설정 실패: {e}")
 
-        if label:
-            try:
-                actor.set_actor_label(label)
-            except Exception:
-                pass
+        if not label:
+            label = os.path.splitext(os.path.basename(asset_path))[0]
+        
+        try:
+            actor.set_actor_label(label)
+        except Exception:
+            pass
+
         unreal.log(f"✅ Spawned: {actor.get_name()} (Movable)")
     else:
         unreal.log_warning("❌ 스폰 실패")

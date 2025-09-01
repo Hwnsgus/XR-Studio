@@ -204,6 +204,15 @@ void UMyEditorSocketSubsystem::HandleIncomingCommand(const FString& Command)
         return;
     }
 
+    UWorld* EditorWorld = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+    if (!EditorWorld)
+    {
+        SendToClient(TEXT("ERR NoWorld\n"));
+        return;
+    }
+
+
+
     if (Command.StartsWith(TEXT("SPAWN_ASSET")))
     {
         auto CleanArg = [](FString S)
@@ -237,7 +246,6 @@ void UMyEditorSocketSubsystem::HandleIncomingCommand(const FString& Command)
             return;
         }
 
-        UWorld* EditorWorld = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
         if (!EditorWorld)
         {
             UE_LOG(UE_LOG_TAG, Error, TEXT("❌ EditorWorld 없음"));
@@ -310,12 +318,6 @@ void UMyEditorSocketSubsystem::HandleIncomingCommand(const FString& Command)
             return;
         }
 
-        UWorld* EditorWorld = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-        if (!EditorWorld)
-        {
-            SendToClient(TEXT("ERR NoWorld\n"));
-            return;
-        }
 
         int32 Applied = 0;
         for (TActorIterator<AActor> It(EditorWorld); It; ++It)
@@ -359,7 +361,6 @@ void UMyEditorSocketSubsystem::HandleIncomingCommand(const FString& Command)
     if (Command.StartsWith(TEXT("GET_SCALE ")))
     {
         FString ActorName = Command.Mid(10).TrimStartAndEnd();
-        UWorld* EditorWorld = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
         if (!EditorWorld) { SendToClient(TEXT("ERR NoWorld\n")); return; }
 
         for (TActorIterator<AActor> It(EditorWorld); It; ++It)
@@ -372,6 +373,41 @@ void UMyEditorSocketSubsystem::HandleIncomingCommand(const FString& Command)
             }
         }
         SendToClient(TEXT("ERR NotFound\n"));
+        return;
+    }
+
+      if (Command.Equals(TEXT("LIST")))
+    {
+        FString Out;
+        for (TActorIterator<AActor> It(EditorWorld); It; ++It)
+        {
+            const FString Name  = It->GetName();
+        #if WITH_EDITOR
+            const FString Label = It->GetActorLabel(true);
+        #else
+            const FString Label = Name;
+        #endif
+            Out += FString::Printf(TEXT("%s|%s\n"), *Label, *Name);
+        }
+        SendToClient(Out.IsEmpty() ? TEXT("") : Out);   // ← SendToClient 사용
+        return;
+    }
+
+    // ✅ LIST_STATIC (StaticMeshActor만, 라벨|네임)
+    if (Command.Equals(TEXT("LIST_STATIC")))
+    {
+        FString Out;
+        for (TActorIterator<AStaticMeshActor> It(EditorWorld); It; ++It)
+        {
+            const FString Name  = It->GetName();
+        #if WITH_EDITOR
+            const FString Label = It->GetActorLabel(true);
+        #else
+            const FString Label = Name;
+        #endif
+            Out += FString::Printf(TEXT("%s|%s\n"), *Label, *Name);
+        }
+        SendToClient(Out.IsEmpty() ? TEXT("") : Out);   // ← SendToClient 사용
         return;
     }
 
@@ -390,7 +426,6 @@ void UMyEditorSocketSubsystem::HandleIncomingCommand(const FString& Command)
         const float Sy = FCString::Atof(*SY);
         const float Sz = FCString::Atof(*SZ);
 
-        UWorld* EditorWorld = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
         if (!EditorWorld) { SendToClient(TEXT("ERR NoWorld\n")); return; }
 
         for (TActorIterator<AActor> It(EditorWorld); It; ++It)
