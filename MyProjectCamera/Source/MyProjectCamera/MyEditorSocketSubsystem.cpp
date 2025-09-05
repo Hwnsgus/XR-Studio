@@ -13,7 +13,8 @@
 #include "AssetRegistry/IAssetRegistry.h"       // IAssetRegistry 인터페이스
 #include "UObject/SoftObjectPath.h"             // FSoftObjectPath
 #include "EngineUtils.h"
-
+#include "Camera/CameraActor.h"       // ⬅ 일반 카메라(선택)
+#include "CineCameraActor.h"          // ⬅ 시네카메라
 #define UE_LOG_TAG LogTemp
 
 void UMyEditorSocketSubsystem::SendToClient(const FString& Text)
@@ -394,22 +395,32 @@ void UMyEditorSocketSubsystem::HandleIncomingCommand(const FString& Command)
     }
 
     // ✅ LIST_STATIC (StaticMeshActor만, 라벨|네임)
-    if (Command.Equals(TEXT("LIST_STATIC")))
-    {
-        FString Out;
-        for (TActorIterator<AStaticMeshActor> It(EditorWorld); It; ++It)
-        {
-            const FString Name  = It->GetName();
-        #if WITH_EDITOR
-            const FString Label = It->GetActorLabel(true);
-        #else
-            const FString Label = Name;
-        #endif
-            Out += FString::Printf(TEXT("%s|%s\n"), *Label, *Name);
-        }
-        SendToClient(Out.IsEmpty() ? TEXT("") : Out);   // ← SendToClient 사용
-        return;
-    }
+// ✅ LIST_STATIC (StaticMeshActor + CameraActor + CineCameraActor, 라벨|네임)
+      if (Command.Equals(TEXT("LIST_STATIC")))
+      {
+          FString Out;
+          for (TActorIterator<AActor> It(EditorWorld); It; ++It)
+          {
+              AActor* Actor = *It;
+              if (!Actor) continue;
+
+              if (Actor->IsA<AStaticMeshActor>() ||
+                  Actor->IsA<ACameraActor>() ||          // ⬅ 일반 카메라 포함 (선택)
+                  Actor->IsA<ACineCameraActor>())        // ⬅ 시네 카메라 포함
+              {
+                  const FString Name = Actor->GetName();
+#if WITH_EDITOR
+                  const FString Label = Actor->GetActorLabel(true);
+#else
+                  const FString Label = Name;
+#endif
+                  Out += FString::Printf(TEXT("%s|%s\n"), *Label, *Name);
+              }
+          }
+          SendToClient(Out.IsEmpty() ? TEXT("") : Out);
+          return;
+      }
+
 
     if (Command.StartsWith(TEXT("SCALE ")))
     {

@@ -15,6 +15,8 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
+#include "Camera/CameraActor.h"      // (일반 카메라도 잡고 싶다면)
+#include "CineCameraActor.h"         // ← ACineCameraActor 정의
 #include "EngineUtils.h"
 
 AMySocketServer::AMySocketServer()
@@ -315,18 +317,27 @@ FString AMySocketServer::HandleCommand(const FString& Command)
     else if (Tokens[0] == "LIST_STATIC")
     {
         FString Out;
-        for (TActorIterator<AStaticMeshActor> It(GetWorld()); It; ++It)
+
+        // 모든 액터 순회
+        for (TActorIterator<AActor> It(GetWorld()); It; ++It)
         {
-            const FString Name = It->GetName();
+            AActor* Actor = *It;
+            if (!Actor) continue;
+
+            // 조건: StaticMeshActor 또는 CineCameraActor
+            if (Actor->IsA<AStaticMeshActor>() || Actor->IsA<ACineCameraActor>())
+            {
+                const FString Name = Actor->GetName();
 
 #if WITH_EDITOR
-            const FString Label = It->GetActorLabel(/*bIncludeCounts=*/true);
-            UE_LOG(LogTemp, Warning, TEXT("🎯 라벨: %s | 이름: %s"), *Label, *Name);
+                const FString Label = Actor->GetActorLabel(/*bIncludeCounts=*/true);
+                UE_LOG(LogTemp, Warning, TEXT("🎯 라벨: %s | 이름: %s"), *Label, *Name);
 #else
-            const FString Label = Name;
+                const FString Label = Name;
 #endif
 
-            Out += FString::Printf(TEXT("%s|%s\n"), *Label, *Name);
+                Out += FString::Printf(TEXT("%s|%s\n"), *Label, *Name);
+            }
         }
 
         return Out.IsEmpty() ? TEXT("\n") : Out;
@@ -515,19 +526,80 @@ FString AMySocketServer::HandleCommand(const FString& Command)
         return FString::Printf(TEXT("❌ '%s' 이름의 액터를 찾을 수 없음"), *ActorName);
     }
 
+    else if (Tokens[0] == "GET_TEXTURES_SLOT" && Tokens.Num() >= 3)
+    {
+        const FString ActorName = Tokens[1];
+        const int32 SlotIndex = FCString::Atoi(*Tokens[2]);
+
+        for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+        {
+            if (!It->GetName().Equals(ActorName, ESearchCase::IgnoreCase))
+                continue;
+
+            FString Result;
+            TArray<UStaticMeshComponent*> MeshComponents;
+            It->GetComponents<UStaticMeshComponent>(MeshComponents);
+
+            bool bFoundAny = false;
+
+            for (UStaticMeshComponent* MeshComp : MeshComponents)
+            {
+                if (!MeshComp || SlotIndex < 0 || SlotIndex >= MeshComp->GetNumMaterials())
+                    continue;
+
+                UMaterialInterface* Mat = MeshComp->GetMaterial(SlotIndex);
+                if (!Mat) continue;
+
+                bFoundAny = true;
+                Result += FString::Printf(TEXT("[Actor] %s\n"), *ActorName);
+                Result += FString::Printf(TEXT("  [Slot]  %d\n"), SlotIndex);
+                Result += FString::Printf(TEXT("  [Mat]   %s\n"), *Mat->GetName());
+
+                // 이 머티리얼이 참조하는 텍스처 수집
+                TArray<UTexture*> Textures;
+                Mat->GetUsedTextures(Textures, EMaterialQualityLevel::High, false, ERHIFeatureLevel::SM5, true);
+
+                if (Textures.Num() == 0)
+                {
+                    Result += TEXT("  [Textures]\n    └ (none)\n");
+                }
+                else
+                {
+                    Result += TEXT("  [Textures]\n");
+                    for (UTexture* Tex : Textures)
+                    {
+                        if (!Tex) continue;
+                        Result += FString::Printf(TEXT("    └ %s\n"), *Tex->GetName());
+                    }
+                }
+
+                // 한 컴포넌트의 해당 슬롯만 보고 종료
+                break;
+            }
+
+            if (!bFoundAny)
+            {
+                return FString::Printf(TEXT("⚠️ 슬롯 %d에 머티리얼/텍스처 없음 또는 컴포넌트 미일치"), SlotIndex);
+            }
+
+            return Result.IsEmpty() ? TEXT("⚠️ 텍스처 없음") : Result;
+        }
+
+        return FString::Printf(TEXT("❌ '%s' 이름의 액터를 찾을 수 없음"), *ActorName);
+        }
+
     else if (Tokens[0] == "SET_MATERIAL" && Tokens.Num() >= 4)
     {
         FString ActorName = Tokens[1];
         int32 SlotIndex = FCString::Atoi(*Tokens[2]);
 
-        // 3번 인덱스부터 끝까지 다시 합쳐 경로 복원
+        // 3번 인덱스부터 끝까지 다시 합쳐 경로 복원 + 정리
         FString MaterialPath;
         {
             TArray<FString> TailTokens;
             for (int32 i = 3; i < Tokens.Num(); ++i) { TailTokens.Add(Tokens[i]); }
             MaterialPath = FString::Join(TailTokens, TEXT(" "));
 
-            // 에디터 서브시스템의 CleanArg와 유사한 정리: 개행/따옴표 제거
             MaterialPath.ReplaceInline(TEXT("\r"), TEXT(""));
             MaterialPath.ReplaceInline(TEXT("\n"), TEXT(""));
             MaterialPath.TrimStartAndEndInline();
@@ -539,10 +611,36 @@ FString AMySocketServer::HandleCommand(const FString& Command)
             }
         }
 
+        // ✅ (1) 디스크 경로 → /Game 경로 자동 변환
+        {
+            FString ContentAbs = FPaths::ConvertRelativePathToFull(FPaths::ProjectContentDir()); // .../MyProject/Content/
+            FString MPath = MaterialPath;
+            MPath.ReplaceInline(TEXT("\\"), TEXT("/"));
+            ContentAbs.ReplaceInline(TEXT("\\"), TEXT("/"));
+
+            if (MPath.StartsWith(ContentAbs))  // D:/.../Content/Textures/Foo_Mat
+            {
+                FString Rel = MPath.Mid(ContentAbs.Len()); // Textures/Foo_Mat
+                MaterialPath = TEXT("/Game/") + Rel;       // /Game/Textures/Foo_Mat
+            }
+        }
+
+        // ✅ (2) 점(.) 자동 보정: /Game/Foo/Bar → /Game/Foo/Bar.Bar
+        if (!MaterialPath.Contains(TEXT(".")))
+        {
+            const FString Short = FPackageName::GetShortName(MaterialPath);
+            MaterialPath += TEXT(".") + Short;
+        }
+
+        // 로드 시도
         UMaterialInterface* NewMaterial =
             Cast<UMaterialInterface>(StaticLoadObject(UMaterialInterface::StaticClass(), nullptr, *MaterialPath));
-        if (!NewMaterial) return TEXT("❌ 머티리얼 로드 실패");
+        if (!NewMaterial)
+        {
+            return FString::Printf(TEXT("❌ 머티리얼 로드 실패: %s"), *MaterialPath);
+        }
 
+        // 적용
         for (TActorIterator<AActor> It(GetWorld()); It; ++It)
         {
             if (It->GetName().Equals(ActorName, ESearchCase::IgnoreCase))
@@ -554,12 +652,14 @@ FString AMySocketServer::HandleCommand(const FString& Command)
                 {
                     if (MeshComp->GetNumMaterials() <= SlotIndex) continue;
                     MeshComp->SetMaterial(SlotIndex, NewMaterial);
-                    return FString::Printf(TEXT("✅ '%s'의 %d번 슬롯 머티리얼 교체 성공"), *ActorName, SlotIndex);
+                    return FString::Printf(TEXT("✅ '%s'의 %d번 슬롯 머티리얼 교체 성공 (%s)"),
+                        *ActorName, SlotIndex, *NewMaterial->GetName());
                 }
             }
         }
         return TEXT("❌ 적용 실패 (액터 또는 슬롯 없음)");
-    }
+        }
+
 
 
         // ✅ 추가: 액터의 StaticMesh를 교체
