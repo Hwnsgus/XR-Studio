@@ -11,7 +11,7 @@ from functools import partial
 # ===============================
 # Unreal "Saved/ScenePresets" absolute directory on your machine
 PRESET_DIR = r"D:\git\XR-Studio\MyProjectCamera\Saved\ScenePresets"
-# Default content roots for convenience
+# Default content roots for conven ience
 DEFAULT_ASSET_PICKER_DIR = r"D:\git\XR-Studio\MyProjectCamera\Content"
 DEFAULT_TEXTURE_DIR      = r"D:\git\XR-Studio\MyProjectCamera\Content\Textures"
 DEFAULT_FBX_EXPORT_DIR   = r"D:\git\XR-Studio\MyProjectCamera\Content\Scripts\ExportedFBX"
@@ -109,7 +109,11 @@ class UnrealSocketClient:
         try:
             is_editor_command = command.startswith("py ") or \
                                 command.startswith("SPAWN_ASSET") or \
-                                command.startswith("IMPORT_FBX")
+                                command.startswith("IMPORT_FBX") or \
+                                command.startswith("LIST") or \
+                                command.startswith("GET") or \
+                                command.startswith("SET") or \
+                                command.startswith("MOVE")
 
             if not self.sock:
                 self.mode_hint = "EDITOR" if is_editor_command else self.mode_hint

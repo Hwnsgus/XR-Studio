@@ -4,14 +4,14 @@ import os
 
 """
 # 로그 저장
-log_path = "D:/UnrealProject/MyProjectCamera/Content/Python/fbx_convert_log.txt"
+log_path = "C:/UnrealProject/MyProjectCamera/Content/Python/fbx_convert_log.txt"
 sys.stdout = open(log_path, 'w')
 sys.stderr = sys.stdout
 """
 
 
-dae_path = "D:/git/XR-Studio/MyProjectCamera/Content/Scripts/ExportedFBX/wall.dae"
-fbx_path = "D:/git/XR-Studio/MyProjectCamera/Content/Scripts/ExportedFBX/wall.fbx"
+dae_path = "C:/git/XR-Studio/MyProjectCamera/Content/Scripts/ExportedFBX/wall.dae"
+fbx_path = "C:/git/XR-Studio/MyProjectCamera/Content/Scripts/ExportedFBX/wall.fbx"
 
 # 새 씬으로 초기화
 bpy.ops.wm.read_factory_settings(use_empty=True)

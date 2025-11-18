@@ -1,0 +1,7 @@
+📂 Importing DAE: D:/UnrealProject/MyProjectCamera/Content/Scripts/ExportedFBX/house.dae
+✅ Imported 28 mesh objects.
+💾 Exporting FBX to: D:/UnrealProject/MyProjectCamera/Content/Scripts/ExportedFBX/house.fbx
+
+FBX export starting... 'D:/UnrealProject/MyProjectCamera/Content/Scripts/ExportedFBX/house.fbx'
+export finished in 0.0979 sec.
+✅ FBX export completed successfully!
