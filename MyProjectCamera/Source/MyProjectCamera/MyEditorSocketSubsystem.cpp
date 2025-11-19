@@ -164,7 +164,10 @@ void UMyEditorSocketSubsystem::PumpClient()
 
 bool UMyEditorSocketSubsystem::IsPIEActive() const
 {
-    return GEditor && GEditor->PlayWorld != nullptr;
+    if (!GEditor) return false;
+
+    const FWorldContext* PIECtx = GEditor->GetPIEWorldContext();
+    return PIECtx && PIECtx->World() != nullptr;
 }
 
 static UObject* LoadAnyObjectByPath(const FString& InPath)
@@ -205,7 +208,15 @@ void UMyEditorSocketSubsystem::HandleIncomingCommand(const FString& Command)
         return;
     }
 
-    UWorld* EditorWorld = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+    UWorld* EditorWorld = nullptr;
+
+    if (GEditor)
+    {
+        FWorldContext& Ctx = GEditor->GetEditorWorldContext();
+        UWorld* EditorWorld = Ctx.World();
+
+    }
+
     if (!EditorWorld)
     {
         SendToClient(TEXT("ERR NoWorld\n"));

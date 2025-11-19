@@ -4,6 +4,8 @@
 #include "GameFramework/Actor.h"
 #include "Sockets.h"
 #include "SocketSubsystem.h"
+#include "CineCameraActor.h"
+
 #include "MySocketServer.generated.h"
 
 UCLASS()
@@ -35,6 +37,10 @@ private:
     FSocket* ClientSocket = nullptr;
     FTimerHandle ListenTimerHandle;
     TSharedPtr<FInternetAddr> PythonAddress;
+
+    bool bCameraTracking = false;
+    TWeakObjectPtr<ACineCameraActor> TrackedCamera;
+    TWeakObjectPtr<AActor>           TrackedTarget;
 
 #if WITH_EDITOR
     void ExecutePythonAfterDelay(const FString& ScriptPath);

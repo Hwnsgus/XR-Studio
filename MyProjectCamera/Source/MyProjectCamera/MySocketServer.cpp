@@ -110,6 +110,14 @@ void AMySocketServer::Tick(float DeltaTime)
         FString Result = HandleCommand(Command);
         SendResponseToPython(Result);
     }
+
+    if (bCameraTracking && TrackedCamera.IsValid() && TrackedTarget.IsValid())
+    {
+        FVector CamLoc = TrackedCamera->GetActorLocation();
+        FVector TargetLoc = TrackedTarget->GetActorLocation();
+        FRotator NewRot = (TargetLoc - CamLoc).Rotation();
+        TrackedCamera->SetActorRotation(NewRot);
+    }
 }
 
 void AMySocketServer::StartListening(int32 Port)
@@ -450,7 +458,90 @@ FString AMySocketServer::HandleCommand(const FString& Command)
         return FString::Printf(TEXT("❌ '%s' 이름의 액터를 찾을 수 없음"), *ActorName);
         }
 
+    else if (Tokens[0] == "CAM_LOOKAT" && Tokens.Num() >= 3)
+    {
+        const FString CamName = Tokens[1];
+        const FString TargetName = Tokens[2];
 
+        ACineCameraActor* Cam = nullptr;
+        AActor* Target = nullptr;
+
+        // 카메라 찾기
+        for (TActorIterator<ACineCameraActor> It(GetWorld()); It; ++It)
+        {
+            if (It->GetName().Equals(CamName, ESearchCase::IgnoreCase))
+            {
+                Cam = *It;
+                break;
+            }
+        }
+
+        if (!Cam)
+            return FString::Printf(TEXT("❌ CineCamera '%s' 을(를) 찾을 수 없음"), *CamName);
+
+        // 타겟 찾기 (모든 액터)
+        for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+        {
+            if (It->GetName().Equals(TargetName, ESearchCase::IgnoreCase))
+            {
+                Target = *It;
+                break;
+            }
+        }
+
+        if (!Target)
+            return FString::Printf(TEXT("❌ 타겟 액터 '%s' 을(를) 찾을 수 없음"), *TargetName);
+
+        const FVector CamLoc = Cam->GetActorLocation();
+        const FVector TargetLoc = Target->GetActorLocation();
+        const FRotator NewRot = (TargetLoc - CamLoc).Rotation();
+        Cam->SetActorRotation(NewRot);
+
+        return FString::Printf(TEXT("✅ %s → %s 바라보기 완료"), *CamName, *TargetName);
+        }
+
+    else if (Tokens[0] == "CAM_TRACK_START" && Tokens.Num() >= 3)
+    {
+        const FString CamName = Tokens[1];
+        const FString TargetName = Tokens[2];
+
+        ACineCameraActor* Cam = nullptr;
+        AActor* Target = nullptr;
+
+        for (TActorIterator<ACineCameraActor> It(GetWorld()); It; ++It)
+        {
+            if (It->GetName().Equals(CamName, ESearchCase::IgnoreCase))
+            {
+                Cam = *It;
+                break;
+            }
+        }
+        if (!Cam) return FString::Printf(TEXT("❌ CineCamera '%s' 없음"), *CamName);
+
+        for (TActorIterator<AActor> It(GetWorld()); It; ++It)
+        {
+            if (It->GetName().Equals(TargetName, ESearchCase::IgnoreCase))
+            {
+                Target = *It;
+                break;
+            }
+        }
+        if (!Target) return FString::Printf(TEXT("❌ 타겟 '%s' 없음"), *TargetName);
+
+        TrackedCamera = Cam;
+        TrackedTarget = Target;
+        bCameraTracking = true;
+
+        return FString::Printf(TEXT("✅ 카메라 트래킹 시작: %s → %s"), *CamName, *TargetName);
+        }
+
+    else if (Tokens[0] == "CAM_TRACK_STOP")
+    {
+        bCameraTracking = false;
+        TrackedCamera = nullptr;
+        TrackedTarget = nullptr;
+        return TEXT("✅ 카메라 트래킹 중지");
+        }
 
     else if (Tokens[0] == "SET_TEXTURE" && Tokens.Num() >= 5)
     {
@@ -483,7 +574,7 @@ FString AMySocketServer::HandleCommand(const FString& Command)
             }
         }
 
-        return TEXT("❌ 적용 실패 (액터 또는 슬롯 없음)");
+
     }
 
     else if (Tokens[0] == "GET_TEXTURES" && Tokens.Num() >= 2)
@@ -763,7 +854,8 @@ FString AMySocketServer::HandleCommand(const FString& Command)
         }
 
 
-    return TEXT("❌ 알 수 없는 명령");
+        // ... 기존 SAVE_PRESET / IMPORT_FBX / 마지막 else 등 유지
+        return TEXT("❌ 알 수 없는 명령");
 }
 
 FString AMySocketServer::GetAllActorNames()

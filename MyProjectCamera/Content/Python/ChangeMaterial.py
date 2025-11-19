@@ -10,15 +10,15 @@ from functools import partial
 # Project paths (edit if needed)
 # ===============================
 # Unreal "Saved/ScenePresets" absolute directory on your machine
-PRESET_DIR = r"D:\git\XR-Studio\MyProjectCamera\Saved\ScenePresets"
+PRESET_DIR = r"C:\git\XR-Studio\MyProjectCamera\Saved\ScenePresets"
 # Default content roots for conven ience
-DEFAULT_ASSET_PICKER_DIR = r"D:\git\XR-Studio\MyProjectCamera\Content"
-DEFAULT_TEXTURE_DIR      = r"D:\git\XR-Studio\MyProjectCamera\Content\Textures"
-DEFAULT_FBX_EXPORT_DIR   = r"D:\git\XR-Studio\MyProjectCamera\Content\Scripts\ExportedFBX"
+DEFAULT_ASSET_PICKER_DIR = r"C:\git\XR-Studio\MyProjectCamera\Content"
+DEFAULT_TEXTURE_DIR      = r"C:\git\XR-Studio\MyProjectCamera\Content\Textures"
+DEFAULT_FBX_EXPORT_DIR   = r"C:\git\XR-Studio\MyProjectCamera\Content\Scripts\ExportedFBX"
 
 # Python scripts inside Unreal project
-EDITOR_SCRIPT_SPAWN  = r"D:\git\XR-Studio\MyProjectCamera\Content\Python\editor_spawn_actor.py"
-EDITOR_SCRIPT_PRESET = r"D:\git\XR-Studio\MyProjectCamera\Content\Python\editor_scene_preset.py"
+EDITOR_SCRIPT_SPAWN  = r"C:\git\XR-Studio\MyProjectCamera\Content\Python\editor_spawn_actor.py"
+EDITOR_SCRIPT_PRESET = r"C:\git\XR-Studio\MyProjectCamera\Content\Python\editor_scene_preset.py"
 
 # ─────────────────────────────────────────────────────
 # 저지연 소켓 클라이언트
@@ -30,106 +30,83 @@ class UnrealSocketClient:
         self.current_port = None
         self.connect_timeout = 0.15
         self.recv_timeout    = 0.40
-        self.mode_hint = "EDITOR"
+        self.mode_hint = "EDITOR"   # 우리가 기억하는 "현재 모드"
 
-
-    def close(self):
-        if self.sock:
-            try:
-                try: self.sock.shutdown(socket.SHUT_RDWR)
-                except Exception: pass
-                self.sock.close()
-            finally:
-                self.sock = None
-                self.current_port = None
-
-    def _new_socket(self):
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-        s.settimeout(self.connect_timeout)
-        return s
-
-    def connect(self, port):
-        if self.sock and self.current_port == port:
-            return True
-        self.close()
-        try:
-            s = self._new_socket()
-            s.connect((self.server_ip, port))
-            s.settimeout(self.recv_timeout)
-            self.sock = s
-            self.current_port = port
-            self.mode_hint = "PIE" if port == self.ports[0] else "EDITOR"
-            print(f"✅ 연결 {self.server_ip}:{port} (mode={self.mode_hint})")
-            return True
-        except Exception as e:
-            print(f"❌ 연결 실패 {port}: {e}")
-            self.sock = None
-            self.current_port = None
-            return False
-
-    def _quick_probe(self):
-        order = [self.ports[1], self.ports[0]] if self.mode_hint == "EDITOR" else [self.ports[0], self.ports[1]]
-        for p in order:
-            if self.connect(p): return True
-        return False
-
-    def _recv_until_newline(self):
-        end = time.time() + self.recv_timeout
-        chunks = []
-        while time.time() < end:
-            try:
-                data = self.sock.recv(4096)
-                if not data: break
-                chunks.append(data)
-                if b'\n' in data: break
-            except socket.timeout:
-                break
-            except Exception as e:
-                return f"❌ 수신 오류: {e}"
-        if not chunks: return ""
-        try:
-            return b"".join(chunks).decode("utf-8", "ignore")
-        except Exception:
-            return "(binary)"
+    # ... (기존 close/_new_socket/connect/_quick_probe/_recv_until_newline 그대로)
 
     def _send_and_get(self, payload: str):
         self.sock.sendall((payload.strip() + "\n").encode("utf-8"))
         return self._recv_until_newline()
 
     def _auto_switch_if_needed(self, resp: str):
-        if not resp: return False
+        # 서버가 명시적으로 알려주는 경우 우선
         if "SWITCH:PIE" in resp or "ERR PIE" in resp:
-            if self.connect(self.ports[0]): self.mode_hint = "PIE"; return True
+            if self.connect(self.ports[0]):   # PIE
+                self.mode_hint = "PIE"
+                return True
         if "SWITCH:EDITOR" in resp:
-            if self.connect(self.ports[1]): self.mode_hint = "EDITOR"; return True
+            if self.connect(self.ports[1]):   # EDITOR
+                self.mode_hint = "EDITOR"
+                return True
         return False
 
-    def send_command(self, command: str):
+    def send_command(self, command: str, preferred: str | None = None):
+        """
+        preferred:
+          - None     : 기존 자동 분류 (is_editor_command 기반)
+          - 'EDITOR' : 9998 우선 사용
+          - 'PIE'    : 9999 우선 사용
+        """
         try:
+            # 1) 기본 분류 (기존 로직 유지)
             is_editor_command = command.startswith("py ") or \
                                 command.startswith("SPAWN_ASSET") or \
                                 command.startswith("IMPORT_FBX") or \
-                                command.startswith("LIST") or \
-                                command.startswith("GET") or \
-                                command.startswith("SET") or \
-                                command.startswith("MOVE")
+                                command.startswith("SAVE_PRESET") or \
+                                command.startswith("LOAD_PRESET")
 
+            # 2) preferred 값으로 강제 덮어쓰기
+            if preferred == "EDITOR":
+                target_port = self.ports[1]
+            elif preferred == "PIE":
+                target_port = self.ports[0]
+            else:
+                # AUTO 모드일 경우: 에디터 명령이면 9998, 아니면 현재 힌트 사용
+                if is_editor_command:
+                    target_port = self.ports[1]
+                else:
+                    # mode_hint를 보고 우선 포트 결정
+                    target_port = self.ports[1] if self.mode_hint == "EDITOR" else self.ports[0]
+
+            # 3) 연결 없으면 우선 포트로 연결 시도
             if not self.sock:
-                self.mode_hint = "EDITOR" if is_editor_command else self.mode_hint
-                if not self._quick_probe(): return "❌ 연결 실패"
+                if not self.connect(target_port):
+                    # 안되면 다른 포트도 한 번씩 시도
+                    other = self.ports[0] if target_port == self.ports[1] else self.ports[1]
+                    if not self.connect(other):
+                        return "❌ 연결 실패"
 
+            # 4) 실제 전송
             resp = self._send_and_get(command)
+
+            # 5) 서버가 모드 전환 요청하면 한 번 더 재전송
             if self._auto_switch_if_needed(resp):
                 resp = self._send_and_get(command)
+
+            # 6) 여전히 응답이 비면 다른 포트도 시도 (안정성 보강)
             if not resp:
                 other = self.ports[0] if self.current_port == self.ports[1] else self.ports[1]
-                if self.connect(other): resp = self._send_and_get(command)
+                if self.connect(other):
+                    resp = self._send_and_get(command)
+
             return resp or "⏳ (no response)"
+
         except Exception as e:
+            # 에러 발생 시 다른 포트도 시도
             try:
                 other = self.ports[0] if self.current_port == self.ports[1] else self.ports[1]
-                if self.connect(other): return self._send_and_get(command)
+                if self.connect(other):
+                    return self._send_and_get(command)
             except Exception as e2:
                 return f"❌ 통신 오류: {e2}"
             return f"❌ 통신 오류: {e}"
