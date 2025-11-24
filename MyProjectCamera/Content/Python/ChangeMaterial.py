@@ -32,6 +32,66 @@ class UnrealSocketClient:
         self.recv_timeout    = 0.40
         self.mode_hint = "EDITOR"   # 우리가 기억하는 "현재 모드"
 
+    def close(self):
+        if self.sock:
+            try:
+                try: self.sock.shutdown(socket.SHUT_RDWR)
+                except Exception: pass
+                self.sock.close()
+            finally:
+                self.sock = None
+                self.current_port = None
+
+    def _new_socket(self):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        s.settimeout(self.connect_timeout)
+        return s
+
+    def connect(self, port):
+        if self.sock and self.current_port == port:
+            return True
+        self.close()
+        try:
+            s = self._new_socket()
+            s.connect((self.server_ip, port))
+            s.settimeout(self.recv_timeout)
+            self.sock = s
+            self.current_port = port
+            self.mode_hint = "PIE" if port == self.ports[0] else "EDITOR"
+            print(f"✅ 연결 {self.server_ip}:{port} (mode={self.mode_hint})")
+            return True
+        except Exception as e:
+            print(f"❌ 연결 실패 {port}: {e}")
+            self.sock = None
+            self.current_port = None
+            return False
+
+    def _quick_probe(self):
+        order = [self.ports[1], self.ports[0]] if self.mode_hint == "EDITOR" else [self.ports[0], self.ports[1]]
+        for p in order:
+            if self.connect(p): return True
+        return False
+
+    def _recv_until_newline(self):
+        end = time.time() + self.recv_timeout
+        chunks = []
+        while time.time() < end:
+            try:
+                data = self.sock.recv(4096)
+                if not data: break
+                chunks.append(data)
+                if b'\n' in data: break
+            except socket.timeout:
+                break
+            except Exception as e:
+                return f"❌ 수신 오류: {e}"
+        if not chunks: return ""
+        try:
+            return b"".join(chunks).decode("utf-8", "ignore")
+        except Exception:
+            return "(binary)"
+        
     # ... (기존 close/_new_socket/connect/_quick_probe/_recv_until_newline 그대로)
 
     def _send_and_get(self, payload: str):
@@ -48,6 +108,25 @@ class UnrealSocketClient:
             if self.connect(self.ports[1]):   # EDITOR
                 self.mode_hint = "EDITOR"
                 return True
+        return False
+    
+    def _quick_probe(self):
+    # 시도 순서: EDITOR(9998) → PIE(9999)
+        order = [self.ports[1], self.ports[0]]
+
+        for port in order:
+            try:
+                if self.connect(port):
+                    if port == self.ports[1]:
+                        self.mode_hint = "EDITOR"
+                    else:
+                        self.mode_hint = "PIE"
+                    return True
+            except:
+                pass
+
+        # 둘 다 실패 → sock=None
+        self.sock = None
         return False
 
     def send_command(self, command: str, preferred: str | None = None):
@@ -409,6 +488,7 @@ class UnifiedUnrealEditorUI:
 
         # 대표 한 개(첫 번째)만 상세 동기화
         first = self.selected_actor_names[0]
+        self.client.send_command(f"CAM_TRACK_START CineCameraActor_0 {first}")
 
         # 위치/스케일 동기화
         loc = self.client.send_command(f"GET_LOCATION {first}")
@@ -753,7 +833,7 @@ class UnifiedUnrealEditorUI:
             if not self.client.connect(self.client.ports[1]):
                 self.log_output.insert(tk.END, "\n❌ Unreal Editor와 연결되지 않았습니다.\n"); return
             cmd = f'py "{EDITOR_SCRIPT_SPAWN}" --asset "{unreal_path}" --spawn --x 1700 --y 0 --z 10 --label "{label}"'
-            resp = self.client.send_command(cmd)
+            resp = self.client.send_command(cmd, preferred="EDITOR")
             self.log_output.insert(tk.END, f"\n{resp}\n")
 
         else:
@@ -769,7 +849,7 @@ class UnifiedUnrealEditorUI:
                 f'--fbx "{fbx_path}" --dest "/Game/Scripts/ExportedFBX" '
                 f'--spawn --x 1700 --y 0 --z 10 --label "{label}"'
             )
-            resp = self.client.send_command(cmd)
+            resp = self.client.send_command(cmd, preferred="EDITOR")
             self.log_output.insert(tk.END, f"\n{resp}\n")
 
     # ---------- 프리셋 UX ----------
