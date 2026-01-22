@@ -34,7 +34,7 @@ Tkinter를 활용하여 직관적인 사용자 인터페이스를 구축했습�
 * **Drag to Scale/Move**: 마우스 드래그로 직관적인 조작
 * **Synchronization**: 언리얼 엔진 뷰포트와 지연 없는(Low-latency) 동기화
 
-<img src="./images/scale.jpg" width="100%" alt="Scale Control Demo">
+<img src="./images/scale." width="100%" alt="Scale Control Demo">
 
 <br>
 
@@ -43,7 +43,7 @@ Tkinter를 활용하여 직관적인 사용자 인터페이스를 구축했습�
 * **Automation**: Python 스크립트(`editor_spawn_actor.py`)를 통해 에셋 로드 및 배치 자동화
 * **Editor Integration**: 에디터 모드에서도 정상 작동 (Editor Subsystem 활용)
 
-<img src="./images/spawn_asset.jpg" width="100%" alt="Asset Spawning Demo">
+<img src="./images/spawn_asset.png" width="100%" alt="Asset Spawning Demo">
 
 <br>
 
@@ -54,7 +54,7 @@ Tkinter를 활용하여 직관적인 사용자 인터페이스를 구축했습�
 
 | **Material Info & Selection** | **After Replacement** |
 | :---: | :---: |
-| <img src="./images/material.jpg" width="100%" alt="Material Info"> | <img src="./images/material2.jpg" width="100%" alt="Material Changed"> |
+| <img src="./images/material.png" width="100%" alt="Material Info"> | <img src="./images/material2.png" width="100%" alt="Material Changed"> |
 
 * `.uasset` 파일 경로를 자동으로 감지하여 `/Game/Content/...` 경로로 변환 후 적용
 * 특정 슬롯(Slot Index)만 타겟팅하여 부분 수정 가능
@@ -90,4 +90,4 @@ Tkinter를 활용하여 직관적인 사용자 인터페이스를 구축했습�
 
 **Hwnsgus**
 * **Role**: Client & Tool Developer
-* **Contact**: [이메일 주소]
+* **Contact**: [h010617@naver.com]
