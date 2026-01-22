@@ -34,7 +34,7 @@ Tkinter를 활용하여 직관적인 사용자 인터페이스를 구축했습�
 * **Drag to Scale/Move**: 마우스 드래그로 직관적인 조작
 * **Synchronization**: 언리얼 엔진 뷰포트와 지연 없는(Low-latency) 동기화
 
-<img src="./images/scale." width="100%" alt="Scale Control Demo">
+<img src="./images/scale.png" width="100%" alt="Scale Control Demo">
 
 <br>
 
