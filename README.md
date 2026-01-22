@@ -25,7 +25,7 @@ Tkinter를 활용하여 직관적인 사용자 인터페이스를 구축했습�
 * **Preset Management**: 우측 패널에서 씬 상태를 저장/로드/삭제 가능
 * **Command Log**: 하단 로그 창을 통해 소켓 통신 상태 실시간 확인
 
-<img src="./images/python_controller.png" width="100%" alt="Python Controller UI">
+<img src="./images/pythion_controller.png" width="100%" alt="Python Controller UI">
 
 <br>
 
